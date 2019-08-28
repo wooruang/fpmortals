@@ -1,4 +1,3 @@
-
 # For Comprehensions
 
 Scala's `for` comprehension is the ideal FP abstraction for sequential
@@ -6,110 +5,147 @@ programs that interact with the world. Since we will be using it a lot,
 we're going to relearn the principles of `for` and how Scalaz can help
 us to write cleaner code.
 
+Scala의 `for` comprehension은  어떤  영역과  상호작용하는  순차적  프로그램을  위한  이상적인 FP 추상이다. 우리는  이것을  매우  많이  사용할  것이기  때문에 `for`의  원리에  대해서  또  어떻게 Scalaz가  명확한  코드를  작성하도록  하는지 다시  배울  것이다.
+
+
+
 This chapter doesn't try to write pure programs and the techniques are
 applicable to non-FP codebases.
 
+이  챕터에서는  순수  함수를  작성하려하지  않는다. 그리고  이것은Non FP 코드기반에서  적용이  가능하다.
 
 ## Syntax Sugar
 
 Scala's `for` is just a simple rewrite rule, also called *syntax
 sugar*, that doesn't have any contextual information.
 
+Scala의 `for`는 *syntax sugar*라고  불리는  간단한  재사용  룰이다. 여기에는  어떤  문맥상의  정보도  없다.
+
 To see what a `for` comprehension is doing, we use the `show` and
 `reify` feature in the REPL to print out what code looks like after
 type inference.
 
+`for` comprehension이 무엇을 하는지 보기 위해서 `show`와 `reify`을 사용할 것이다. 타입이 어떻게 추론되는지 확인하기 위해서 REPL에서 진행할 것이다.
+
+
+
 {lang="text"}
-~~~~~~~~
+
+```
   scala> import scala.reflect.runtime.universe._
   scala> val a, b, c = Option(1)
   scala> show { reify {
            for { i <- a ; j <- b ; k <- c } yield (i + j + k)
          } }
-  
+
   res:
   $read.a.flatMap(
     ((i) => $read.b.flatMap(
       ((j) => $read.c.map(
         ((k) => i.$plus(j).$plus(k)))))))
-~~~~~~~~
+```
 
 There is a lot of noise due to additional sugarings (e.g. `+` is
 rewritten `$plus`, etc). We will skip the `show` and `reify` for brevity
 when the REPL line is `reify>`, and manually clean up the generated
 code so that it doesn't become a distraction.
 
+여기에는 sugaring된 것들 때문에  불필요한 것들이 많다.(예를  들면 `+`는 `$plus`로  다시  쓰였고  그  밖의  것들도  있다.) REPL 라인인 `reify>`에서는  간결함을  위해 `show`와 `reify`는  생략할  것  이다. 그리고  산만해지기  때문에  수동으로  생성된  코드를 정리할  것  이다.
+
 {lang="text"}
-~~~~~~~~
+
+```
   reify> for { i <- a ; j <- b ; k <- c } yield (i + j + k)
-  
+
   a.flatMap {
     i => b.flatMap {
       j => c.map {
         k => i + j + k }}}
-~~~~~~~~
+```
 
 The rule of thumb is that every `<-` (called a *generator*) is a
 nested `flatMap` call, with the final generator a `map` containing the
 `yield` body.
+
+경험적으로 모든 `<-`(*generatro*라고 불리는) 표현들은 중첩된 `flatMap` 호출이고 `yield`에서 해당하는 최종 생성기인 부분은 `map`이다. 
 
 
 ### Assignment
 
 We can assign values inline like `ij = i + j` (a `val` keyword is not
 needed).
+우리는 `ij = i + j`와 같이 값을 할당할 수 있다 (`val` 키워드는 필요하지 않다).
 
 {lang="text"}
-~~~~~~~~
+
+```
   reify> for {
            i <- a
            j <- b
            ij = i + j
            k <- c
          } yield (ij + k)
-  
+
   a.flatMap {
     i => b.map { j => (j, i + j) }.flatMap {
       case (j, ij) => c.map {
         k => ij + k }}}
-~~~~~~~~
+```
 
 A `map` over the `b` introduces the `ij` which is flat-mapped along
 with the `j`, then the final `map` for the code in the `yield`.
+
+`b`의 `map`에서 `ij`가 처음으로 나오고 `j`와 같이 묶인다(원문: flat-mapped). 그리고 나서 `yield`의 부분인 마지막 `map`이 나온다.
+
 
 Unfortunately we cannot assign before any generators. It has been
 requested as a language feature but has not been implemented:
 <https://github.com/scala/bug/issues/907>
 
+불행히도 우리는 생성기 앞부분에 어느것도 할당할 수 없다. 이 부분은 언어적 특성으로 개선이 요청되어졌는데 아직 반영되지 않았다:
+<https://github.com/scala/bug/issues/907>
+
 {lang="text"}
-~~~~~~~~
+
+```
   scala> for {
            initial = getDefault
            i <- a
          } yield initial + i
   <console>:1: error: '<-' expected but '=' found.
-~~~~~~~~
+```
 
 We can workaround the limitation by defining a `val` outside the `for`
 
+우리는 차선책으로 `for`문 밖에 `val`을 정의함으로써 이 제한을 극복하거나
+
 {lang="text"}
-~~~~~~~~
+
+```
   scala> val initial = getDefault
   scala> for { i <- a } yield initial + i
-~~~~~~~~
+```
 
 or create an `Option` out of the initial assignment
 
+또는 초기 할당 바깥에 `Option`을 생성함으로 사용할 수 있다.
+
 {lang="text"}
-~~~~~~~~
+
+```
   scala> for {
            initial <- Option(getDefault)
            i <- a
          } yield initial + i
-~~~~~~~~
+```
 
 A> `val` doesn't have to assign to a single value, it can be anything
+A> 
+A> `val`을 단일 값으로만 할당할 필요는 없다. 어떤 값이던 할당할 수 있다.
+A> 
 A> that works as a `case` in a pattern match.
+A> 
+A> 이것은 패턴 매치에서 `case`로써 동작한다.
 A> 
 A> {lang="text"}
 A> ~~~~~~~~
@@ -125,6 +161,8 @@ A> ~~~~~~~~
 A> 
 A> The same is true for assignment in `for` comprehensions
 A> 
+A> `for` comprehension 안에서의 할당과 똑같다.
+A> 
 A> {lang="text"}
 A> ~~~~~~~~
 A>   scala> val maybe = Option(("hello", "world"))
@@ -138,56 +176,69 @@ A>
 A> But be careful not to miss any cases or there will be a runtime exception (a
 A> *totality* failure).
 A> 
+A> 그러나 어떤 케이스라도 놓치지 않도록 해야한다. 그렇지 않으면 런타임 예외가 발생할 것이다.
+A> (*전체* 실패)
+A> 
 A> {lang="text"}
 A> ~~~~~~~~
 A>   scala> val a :: tail = list
 A>   caught scala.MatchError: List()
 A> ~~~~~~~~
 
-
 ### Filter
 
 It is possible to put `if` statements after a generator to filter
 values by a predicate
 
+특성에 의해 값들을 걸러 내기 위하여 생성기 뒤에 `if`문을 넣는 것이 가능하다. 
+
 {lang="text"}
-~~~~~~~~
+
+```
   reify> for {
            i  <- a
            j  <- b
            if i > j
            k  <- c
          } yield (i + j + k)
-  
+
   a.flatMap {
     i => b.withFilter {
       j => i > j }.flatMap {
         j => c.map {
           k => i + j + k }}}
-~~~~~~~~
+```
 
 Older versions of Scala used `filter`, but `Traversable.filter` creates new
 collections for every predicate, so `withFilter` was introduced as the more
 performant alternative. We can accidentally trigger a `withFilter` by providing
 type information, interpreted as a pattern match.
 
+스칼라의 오래된 버전들은 `filter`를 사용하지만 `Traversable.filter`는 모든 특성을 위한 새로운 컬렉션들을 생성한다. 그래서 `withFilter`가 대체제로 소개되어졌다.
+우리는 타입 정보를 제공함으로써 우리가 직접 사용하지 않더라도 `withFilter`가 실행될 수 있다.
+
 {lang="text"}
-~~~~~~~~
+
+```
   reify> for { i: Int <- a } yield i
-  
+
   a.withFilter {
     case i: Int => true
     case _      => false
   }.map { case i: Int => i }
-~~~~~~~~
+```
 
 Like assignment, a generator can use a pattern match on the left hand side. But
 unlike assignment (which throws `MatchError` on failure), generators are
 *filtered* and will not fail at runtime. However, there is an inefficient double
 application of the pattern.
 
+할당처럼, 생성기는 left hand side의 패턴 매치를 사용할 수 있다. 그러나 할당과 다르게(실패일 때 `MatchError`를 내뱉는), 생성기들은 *걸러내고* 런타임 때 실패하지 않을 것이다. 하지만 패턴의 중복 적용은 비효율적이다.
+
 A> The compiler plugin [`better-monadic-for`](https://github.com/oleg-py/better-monadic-for) produces alternative, **better**,
 A> desugarings than the Scala compiler. This example is interpreted as:
+A> 
+A> 컴파일러 플러그인 [`better-monadic-for`](https://github.com/oleg-py/better-monadic-for)은 대안, 더 좋은, Scala 컴파일러보다 desugaring된 것을 생성한다.
 A> 
 A> {lang="text"}
 A> ~~~~~~~~
@@ -198,6 +249,9 @@ A> ~~~~~~~~
 A> 
 A> instead of inefficient double matching (in the best case) and silent filtering
 A> at runtime (in the worst case). Highly recommended.
+A> 
+A> 비효율적인 중복 매칭과 런타임 때 침묵 필터링 대신 강력하게 추천한다.
+A> 
 
 
 ### For Each
@@ -205,13 +259,15 @@ A> at runtime (in the worst case). Highly recommended.
 Finally, if there is no `yield`, the compiler will use `foreach`
 instead of `flatMap`, which is only useful for side-effects.
 
-{lang="text"}
-~~~~~~~~
-  reify> for { i <- a ; j <- b } println(s"$i $j")
-  
-  a.foreach { i => b.foreach { j => println(s"$i $j") } }
-~~~~~~~~
+마지막으로 `yield`가 없다면 컴파일러는 `foreach`를 사용할 것이다. `flatMap` 대신에, 이것은 side-effect들에만 유용하다.
 
+{lang="text"}
+
+```
+  reify> for { i <- a ; j <- b } println(s"$i $j")
+
+  a.foreach { i => b.foreach { j => println(s"$i $j") } }
+```
 
 ### Summary
 
@@ -219,23 +275,30 @@ The full set of methods supported by `for` comprehensions do not share
 a common super type; each generated snippet is independently compiled.
 If there were a trait, it would roughly look like:
 
+`for` comprehensions에 의해서 지원되는 method들의 전체 셋은 주요 최상위 타입(super tpye)을 공유하지 않는다; 각 생성된 조각은 독립적으로 컴파일 되어진다. trait이 있다면 대략 이렇게 보일 것이다.
+
 {lang="text"}
-~~~~~~~~
+
+```
   trait ForComprehensible[C[_]] {
     def map[A, B](f: A => B): C[B]
     def flatMap[A, B](f: A => C[B]): C[B]
     def withFilter[A](p: A => Boolean): C[A]
     def foreach[A](f: A => Unit): Unit
   }
-~~~~~~~~
+```
 
 If the context (`C[_]`) of a `for` comprehension doesn't provide its
 own `map` and `flatMap`, all is not lost. If an implicit
 `scalaz.Bind[T]` is available for `T`, it will provide `map` and
 `flatMap`.
 
+`for` comprehension의 context (`C[_]`)가 자신의 `map` 과 `flatMap`을 제공하지 않는다면 모든것이 손실되지 않을 것이다. `T`를 위한 명시적인 `scalaz.Bind[T]`가 사용가능하다면 `map`과 `flatMap`을 제공할 것이다.
+
 A> It often surprises developers when inline `Future` calculations in a
 A> `for` comprehension do not run in parallel:
+A> 
+A> inline `Future` 연산이 `for` comprehension안에서 병렬적으로 실행되지 않는 것이 개발자들을 자주 놀라게한다.
 A> 
 A> {lang="text"}
 A> ~~~~~~~~
@@ -253,6 +316,9 @@ A> strictly **after** `expensiveCalc`. To ensure that two `Future`
 A> calculations begin in parallel, start them outside the `for`
 A> comprehension.
 A> 
+A> 그 이유는 `flatMap`가 `anothreExpensiveCalc`를 호출 하는 것이 정확하게 `expensiveCalc` 후이기 때문이다.
+A> 두개의 `Future` 연산이 병렬적으로 실해되게 하려면 `for` comprehendion 밖에서 실행해야한다.
+A> 
 A> {lang="text"}
 A> ~~~~~~~~
 A>   val a = Future { expensiveCalc() }
@@ -263,6 +329,8 @@ A>
 A> `for` comprehensions are fundamentally for defining sequential
 A> programs. We will show a far superior way of defining parallel
 A> computations in a later chapter. Spoiler: don't use `Future`.
+A> 
+A> `for` comprehension들은 근본적으로 순차적 프로그램을 정의하기 위한 것이다. 이 후 챕터에서 병렬적 처리를 정의하는 훨씬 더 나은 방법을 살펴볼 것이다. 스포일러: `Future`을 사용하지 마십시오.
 
 
 ## Unhappy path
@@ -271,25 +339,34 @@ So far we've only looked at the rewrite rules, not what is happening in `map`
 and `flatMap`. Consider what happens when the `for` context decides that it
 cannot proceed any further.
 
+이제까지 우리는 `map`과 `flatMap`에서 어떠한 일이 일어나는지보다 단지 규칙들을 재사용하는 것을 보기만 하였다. `for` context가 더 이상 진행할 수 없다고 결정할 때 어떤 일이 일어날 것인지 생각해보라.
+
 In the `Option` example, the `yield` is only called when `i,j,k` are
 all defined.
 
+`Option`을 예를 들면, `yield`는 오직 `i,j,k`가 모두 정의되어졌을 때 호출된다.
+
 {lang="text"}
-~~~~~~~~
+
+```
   for {
     i <- a
     j <- b
     k <- c
   } yield (i + j + k)
-~~~~~~~~
+```
 
 If any of `a,b,c` are `None`, the comprehension short-circuits with
 `None` but it doesn't tell us what went wrong.
+
+`a,b,c`의 하나라도 `None`이라면 comprehension은 `None`과 함께 정지시킬것이다. 그러나 이것을 우리가 잘못되었다고 말하지 않는다.
 
 A> There are many functions in the wild that take `Option` parameters but actually
 A> require all parameters to exist. An alternative to throwing a runtime exception
 A> is to use a `for` comprehension, giving us totality (a return value for every
 A> input):
+A> 
+A> 여기 `Option` 파라미터를 취하는 많은 함수들이 있다. 그러나 사실 모든 파라미터들은 존재해야한다. 런타임 예외를 발생시키기 위한 대안으로  `for` comprehension을 사용하여 전체를 우리에게 주는 것이다.(모든 입력의 반환 값) 
 A> 
 A> {lang="text"}
 A> ~~~~~~~~
@@ -306,6 +383,8 @@ A> but this is verbose, clunky and bad style. If a function requires
 A> every input then it should make its requirement explicit, pushing the
 A> responsibility of dealing with optional parameters to its caller.
 A> 
+A> 그러나 이것은 장황하고 구식이고 좋지 않은 스타일이다. 함수가 모든 입력을 요구한다면 호출자가 선택적인 매개변수를 다루는 책임을 넘겨 요구를 명시적으로 만들어야한다.
+A> 
 A> {lang="text"}
 A> ~~~~~~~~
 A>   def namedThings(name: String, num: Int) = s"$num ${name}s"
@@ -313,22 +392,28 @@ A> ~~~~~~~~
 
 If we use `Either`, then a `Left` will cause the `for` comprehension
 to short circuit with extra information, much better than `Option` for
-error reporting:
+error reporting
+
+`Either`를 사용한다면 에러 발생을 위해 `Option`보다 더 나은 방법으로 추가 정보를 차단하기 위해 `for` comprehension을 야기할 것이다.
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> val a = Right(1)
   scala> val b = Right(2)
   scala> val c: Either[String, Int] = Left("sorry, no c")
   scala> for { i <- a ; j <- b ; k <- c } yield (i + j + k)
-  
+
   Left(sorry, no c)
-~~~~~~~~
+```
 
 And lastly, let's see what happens with a `Future` that fails:
 
+마지막으로 `Future`에서 실패 했을때 어떤일 이 일어나는지 살펴보자.
+
 {lang="text"}
-~~~~~~~~
+
+```
   scala> import scala.concurrent._
   scala> import ExecutionContext.Implicits.global
   scala> for {
@@ -337,10 +422,12 @@ And lastly, let's see what happens with a `Future` that fails:
          } yield (i + j)
   scala> Await.result(f, duration.Duration.Inf)
   caught java.lang.Throwable
-~~~~~~~~
+```
 
 The `Future` that prints to the terminal is never called because, like
 `Option` and `Either`, the `for` comprehension short circuits.
+
+터미널에 출력된 `Future`는 절대로 호출되지 않는다. `Options`과 `Either`처럼 `for` comprehension이 차단하기 때문이다.
 
 Short circuiting for the unhappy path is a common and important theme.
 `for` comprehensions cannot express resource cleanup: there is no way
@@ -349,6 +436,7 @@ responsibility for unexpected error recovery and resource cleanup onto
 the context (which is usually a `Monad` as we will see later), not the
 business logic.
 
+부적절한 경로의 차단은 주요하고 중요한 테마이다. `for` comprehension들은 자원의 정리를 표현할 수 없다: `try` / `finally`의 방법이 없다. 예상되지 않은 에러의 발견과 context(보통 이것을 `Monad`라고 하는데 이후에 살펴볼 것이다.)에서 비지니스 로직이 아닌 자원 정리에 대한 책임의 정리 주체를 부여하는 것은 FP에서 좋은 일이다.
 
 ## Gymnastics
 
@@ -358,6 +446,7 @@ require mental summersaults. This section collects some practical
 examples and how to deal with them.
 
 
+
 ### Fallback Logic
 
 Say we are calling out to a method that returns an `Option`. If it is not
@@ -365,36 +454,40 @@ successful we want to fallback to another method (and so on and so on), like
 when we're using a cache:
 
 {lang="text"}
-~~~~~~~~
+
+```
   def getFromRedis(s: String): Option[String]
   def getFromSql(s: String): Option[String]
-  
+
   getFromRedis(key) orElse getFromSql(key)
-~~~~~~~~
+```
 
 If we have to do this for an asynchronous version of the same API
 
 {lang="text"}
-~~~~~~~~
+
+```
   def getFromRedis(s: String): Future[Option[String]]
   def getFromSql(s: String): Future[Option[String]]
-~~~~~~~~
+```
 
 then we have to be careful not to do extra work because
 
 {lang="text"}
-~~~~~~~~
+
+```
   for {
     cache <- getFromRedis(key)
     sql   <- getFromSql(key)
   } yield cache orElse sql
-~~~~~~~~
+```
 
 will run both queries. We can pattern match on the first result but
 the type is wrong
 
 {lang="text"}
-~~~~~~~~
+
+```
   for {
     cache <- getFromRedis(key)
     res   <- cache match {
@@ -402,12 +495,13 @@ the type is wrong
                case None    => getFromSql(key)
              }
   } yield res
-~~~~~~~~
+```
 
 We need to create a `Future` from the `cache`
 
 {lang="text"}
-~~~~~~~~
+
+```
   for {
     cache <- getFromRedis(key)
     res   <- cache match {
@@ -415,11 +509,10 @@ We need to create a `Future` from the `cache`
                case None    => getFromSql(key)
              }
   } yield res
-~~~~~~~~
+```
 
 `Future.successful` creates a new `Future`, much like an `Option` or
 `List` constructor.
-
 
 ### Early Exit
 
@@ -429,54 +522,58 @@ If we want to exit early with an error, it is standard practice in OOP to throw
 an exception
 
 {lang="text"}
-~~~~~~~~
+
+```
   def getA: Int = ...
-  
+
   val a = getA
   require(a > 0, s"$a must be positive")
   a * 10
-~~~~~~~~
+```
 
 which can be rewritten async
 
 {lang="text"}
-~~~~~~~~
+
+```
   def getA: Future[Int] = ...
   def error(msg: String): Future[Nothing] =
     Future.failed(new RuntimeException(msg))
-  
+
   for {
     a <- getA
     b <- if (a <= 0) error(s"$a must be positive")
          else Future.successful(a)
   } yield b * 10
-~~~~~~~~
+```
 
 But if we want to exit early with a successful return value, the simple
 synchronous code:
 
 {lang="text"}
-~~~~~~~~
+
+```
   def getB: Int = ...
-  
+
   val a = getA
   if (a <= 0) 0
   else a * getB
-~~~~~~~~
+```
 
 translates into a nested `for` comprehension when our dependencies are
 asynchronous:
 
 {lang="text"}
-~~~~~~~~
+
+```
   def getB: Future[Int] = ...
-  
+
   for {
     a <- getA
     c <- if (a <= 0) Future.successful(0)
          else for { b <- getB } yield a * b
   } yield c
-~~~~~~~~
+```
 
 A> If there is an implicit `Monad[T]` for `T[_]` (i.e. `T` is monadic) then Scalaz
 A> lets us create a `T[A]` from a value `a: A` by calling `a.pure[T]`.
@@ -494,14 +591,14 @@ A>          else for { b <- getB } yield a * b
 A>   } yield c
 A> ~~~~~~~~
 
-
 ## Incomprehensible
 
 The context we're comprehending over must stay the same: we cannot mix
 contexts.
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> def option: Option[Int] = ...
   scala> def future: Future[Int] = ...
   scala> for {
@@ -513,7 +610,7 @@ contexts.
    required: Option[?]
            b <- future
                 ^
-~~~~~~~~
+```
 
 Nothing can help us mix arbitrary contexts in a `for` comprehension
 because the meaning is not well defined.
@@ -522,7 +619,8 @@ But when we have nested contexts the intention is usually obvious yet
 the compiler still doesn't accept our code.
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> def getA: Future[Option[Int]] = ...
   scala> def getB: Future[Option[Int]] = ...
   scala> for {
@@ -531,7 +629,7 @@ the compiler still doesn't accept our code.
          } yield a * b
                    ^
   <console>:30: error: value * is not a member of Option[Int]
-~~~~~~~~
+```
 
 Here we want `for` to take care of the outer context and let us write
 our code on the inner `Option`. Hiding the outer context is exactly
@@ -545,28 +643,31 @@ We create an `OptionT` from each method call. This changes the context
 of the `for` from `Future[Option[_]]` to `OptionT[Future, _]`.
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> val result = for {
            a <- OptionT(getA)
            b <- OptionT(getB)
          } yield a * b
   result: OptionT[Future, Int] = OptionT(Future(<not completed>))
-~~~~~~~~
+```
 
 `.run` returns us to the original context
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> result.run
   res: Future[Option[Int]] = Future(<not completed>)
-~~~~~~~~
+```
 
 The monad transformer also allows us to mix `Future[Option[_]]` calls with
 methods that just return plain `Future` via `.liftM[OptionT]` (provided by
 scalaz):
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> def getC: Future[Int] = ...
   scala> val result = for {
            a <- OptionT(getA)
@@ -574,13 +675,14 @@ scalaz):
            c <- getC.liftM[OptionT]
          } yield a * b / c
   result: OptionT[Future, Int] = OptionT(Future(<not completed>))
-~~~~~~~~
+```
 
 and we can mix with methods that return plain `Option` by wrapping
 them in `Future.successful` (`.pure[Future]`) followed by `OptionT`
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> def getD: Option[Int] = ...
   scala> val result = for {
            a <- OptionT(getA)
@@ -589,26 +691,28 @@ them in `Future.successful` (`.pure[Future]`) followed by `OptionT`
            d <- OptionT(getD.pure[Future])
          } yield (a * b) / (c * d)
   result: OptionT[Future, Int] = OptionT(Future(<not completed>))
-~~~~~~~~
+```
 
 It is messy again, but it is better than writing nested `flatMap` and
 `map` by hand. We can clean it up with a DSL that handles all the
 required conversions into `OptionT[Future, _]`
 
 {lang="text"}
-~~~~~~~~
+
+```
   def liftFutureOption[A](f: Future[Option[A]]) = OptionT(f)
   def liftFuture[A](f: Future[A]) = f.liftM[OptionT]
   def liftOption[A](o: Option[A]) = OptionT(o.pure[Future])
   def lift[A](a: A)               = liftOption(Option(a))
-~~~~~~~~
+```
 
 combined with the `|>` operator, which applies the function on the
 right to the value on the left, to visually separate the logic from
 the transformers
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> val result = for {
            a <- getA       |> liftFutureOption
            b <- getB       |> liftFutureOption
@@ -617,7 +721,7 @@ the transformers
            e <- 10         |> lift
          } yield e * (a * b) / (c * d)
   result: OptionT[Future, Int] = OptionT(Future(<not completed>))
-~~~~~~~~
+```
 
 A> `|>` is often called the *thrush operator* because of its uncanny resemblance to
 A> the cute bird. Those who do not like symbolic operators can use the alias
@@ -628,7 +732,6 @@ their lifting methods are more complex and require parameters. Scalaz provides
 monad transformers for a lot of its own types, so it is worth checking if one is
 available.
 
-
 # Application Design
 
 In this chapter we will write the business logic and tests for a purely
@@ -636,7 +739,6 @@ functional server application. The source code for this application is included
 under the `example` directory along with the book's source, however it is
 recommended not to read the source code until the final chapter as there will be
 significant refactors as we learn more about FP.
-
 
 ## Specification
 
@@ -685,7 +787,6 @@ The failure mode should always be to take the least costly option.
 Both Drone and GKE have a JSON over REST API with OAuth 2.0
 authentication.
 
-
 ## Interfaces / Algebras
 
 We will now codify the architecture diagram from the previous section. Firstly,
@@ -694,14 +795,15 @@ such a simple thing does not exist in either the Java or Scala standard
 libraries:
 
 {lang="text"}
-~~~~~~~~
+
+```
   import scala.concurrent.duration._
-  
+
   final case class Epoch(millis: Long) extends AnyVal {
     def +(d: FiniteDuration): Epoch = Epoch(millis + d.toMillis)
     def -(e: Epoch): FiniteDuration = (millis - e.millis).millis
   }
-~~~~~~~~
+```
 
 In FP, an *algebra* takes the place of an `interface` in Java, or the
 set of valid messages for an `Actor` in Akka. This is the layer where
@@ -711,12 +813,13 @@ There is tight iteration between writing the business logic and the
 algebra: it is a good level of abstraction to design a system.
 
 {lang="text"}
-~~~~~~~~
+
+```
   trait Drone[F[_]] {
     def getBacklog: F[Int]
     def getAgents: F[Int]
   }
-  
+
   final case class MachineNode(id: String)
   trait Machines[F[_]] {
     def getTime: F[Epoch]
@@ -725,7 +828,7 @@ algebra: it is a good level of abstraction to design a system.
     def start(node: MachineNode): F[MachineNode]
     def stop(node: MachineNode): F[MachineNode]
   }
-~~~~~~~~
+```
 
 We've used `NonEmptyList`, easily created by calling `.toNel` on the
 stdlib's `List` (returning an `Option[NonEmptyList]`), otherwise
@@ -745,7 +848,6 @@ A> We prefer `NonEmptyList`, not because it is a `List`, but because of its
 A> non-empty property. When we learn about Scalaz's typeclass hierarchy, we will
 A> see a better way to request non-emptyness.
 
-
 ## Business Logic
 
 Now we write the business logic that defines the application's
@@ -759,7 +861,8 @@ would probably be a `var` in a stateful `Actor`.
 algebras, and adds a *pending* field to track unfulfilled requests.
 
 {lang="text"}
-~~~~~~~~
+
+```
   final case class WorldView(
     backlog: Int,
     agents: Int,
@@ -768,7 +871,7 @@ algebras, and adds a *pending* field to track unfulfilled requests.
     pending: Map[MachineNode, Epoch],
     time: Epoch
   )
-~~~~~~~~
+```
 
 Now we are ready to write our business logic, but we need to indicate
 that we depend on `Drone` and `Machines`.
@@ -776,13 +879,14 @@ that we depend on `Drone` and `Machines`.
 We can write the interface for the business logic
 
 {lang="text"}
-~~~~~~~~
+
+```
   trait DynAgents[F[_]] {
     def initial: F[WorldView]
     def update(old: WorldView): F[WorldView]
     def act(world: WorldView): F[WorldView]
   }
-~~~~~~~~
+```
 
 and implement it with a *module*. A module depends only on other modules,
 algebras and pure functions, and can be abstracted over `F`. If an
@@ -790,10 +894,11 @@ implementation of an algebraic interface is tied to a specific type, e.g. `IO`,
 it is called an *interpreter*.
 
 {lang="text"}
-~~~~~~~~
+
+```
   final class DynAgentsModule[F[_]: Monad](D: Drone[F], M: Machines[F])
     extends DynAgents[F] {
-~~~~~~~~
+```
 
 The `Monad` context bound means that `F` is *monadic*, allowing us to use `map`,
 `pure` and, of course, `flatMap` via `for` comprehensions.
@@ -805,13 +910,13 @@ for monad and algebra implementations.
 Our business logic will run in an infinite loop (pseudocode)
 
 {lang="text"}
-~~~~~~~~
+
+```
   state = initial()
   while True:
     state = update(state)
     state = act(state)
-~~~~~~~~
-
+```
 
 ### initial
 
@@ -819,7 +924,8 @@ In `initial` we call all external services and aggregate their results
 into a `WorldView`. We default the `pending` field to an empty `Map`.
 
 {lang="text"}
-~~~~~~~~
+
+```
   def initial: F[WorldView] = for {
     db <- D.getBacklog
     da <- D.getAgents
@@ -827,7 +933,7 @@ into a `WorldView`. We default the `pending` field to an empty `Map`.
     ma <- M.getAlive
     mt <- M.getTime
   } yield WorldView(db, da, mm, ma, Map.empty, mt)
-~~~~~~~~
+```
 
 Recall from Chapter 1 that `flatMap` (i.e. when we use the `<-`
 generator) allows us to operate on a value that is computed at
@@ -836,7 +942,6 @@ be interpreted at runtime, that we can then `flatMap`. This is how we
 safely chain together sequential side-effecting code, whilst being
 able to provide a pure implementation for tests. FP could be described
 as Extreme Mocking.
-
 
 ### update
 
@@ -848,7 +953,8 @@ pending action is taking longer than 10 minutes to do anything, we
 assume that it failed and forget that we asked to do it.
 
 {lang="text"}
-~~~~~~~~
+
+```
   def update(old: WorldView): F[WorldView] = for {
     snap <- initial
     changed = symdiff(old.alive.keySet, snap.alive.keySet)
@@ -857,16 +963,15 @@ assume that it failed and forget that we asked to do it.
     }
     update = snap.copy(pending = pending)
   } yield update
-  
+
   private def symdiff[T](a: Set[T], b: Set[T]): Set[T] =
     (a union b) -- (a intersect b)
-~~~~~~~~
+```
 
 Concrete functions like `.symdiff` don't need test interpreters, they have
 explicit inputs and outputs, so we could move all pure code into standalone
 methods on a stateless `object`, testable in isolation. We're happy testing only
 the public methods, preferring that our business logic is easy to read.
-
 
 ### act
 
@@ -886,7 +991,8 @@ have no agents, we have no nodes alive, and there are no pending
 actions. We return a candidate node that we would like to start:
 
 {lang="text"}
-~~~~~~~~
+
+```
   private object NeedsAgent {
     def unapply(world: WorldView): Option[MachineNode] = world match {
       case WorldView(backlog, 0, managed, alive, pending, _)
@@ -895,7 +1001,7 @@ actions. We return a candidate node that we would like to start:
       case _ => None
     }
   }
-~~~~~~~~
+```
 
 If there is no backlog, we should stop all nodes that have become stale (they
 are not doing any work). However, since Google charge per hour we only shut down
@@ -906,7 +1012,8 @@ As a financial safety net, all nodes should have a maximum lifetime of
 5 hours.
 
 {lang="text"}
-~~~~~~~~
+
+```
   private object Stale {
     def unapply(world: WorldView): Option[NonEmptyList[MachineNode]] = world match {
       case WorldView(backlog, _, _, alive, pending, time) if alive.nonEmpty =>
@@ -914,25 +1021,26 @@ As a financial safety net, all nodes should have a maximum lifetime of
           case (n, started) if backlog == 0 && (time - started).toMinutes % 60 >= 58 => n
           case (n, started) if (time - started) >= 5.hours => n
         }.toList.toNel
-  
+
       case _ => None
     }
   }
-~~~~~~~~
+```
 
 Now that we have detected the scenarios that can occur, we can write
 the `act` method. When we schedule a node to be started or stopped, we
 add it to `pending` noting the time that we scheduled the action.
 
 {lang="text"}
-~~~~~~~~
+
+```
   def act(world: WorldView): F[WorldView] = world match {
     case NeedsAgent(node) =>
       for {
         _ <- M.start(node)
         update = world.copy(pending = Map(node -> world.time))
       } yield update
-  
+
     case Stale(nodes) =>
       nodes.foldLeftM(world) { (world, n) =>
         for {
@@ -940,10 +1048,10 @@ add it to `pending` noting the time that we scheduled the action.
           update = world.copy(pending = world.pending + (n -> world.time))
         } yield update
       }
-  
+
     case _ => world.pure[F]
   }
-~~~~~~~~
+```
 
 Because `NeedsAgent` and `Stale` do not cover all possible situations,
 we need a catch-all `case _` to do nothing. Recall from Chapter 2 that
@@ -953,7 +1061,6 @@ we need a catch-all `case _` to do nothing. Recall from Chapter 2 that
 monadic value. In our case, each iteration of the fold returns `F[WorldView]`.
 The `M` is for Monadic. We will find more of these *lifted* methods that behave
 as one would expect, taking monadic values in place of values.
-
 
 ## Unit Tests
 
@@ -971,21 +1078,22 @@ interpreted differently in the unit tests.
 We will start with some test data
 
 {lang="text"}
-~~~~~~~~
+
+```
   object Data {
     val node1   = MachineNode("1243d1af-828f-4ba3-9fc0-a19d86852b5a")
     val node2   = MachineNode("550c4943-229e-47b0-b6be-3d686c5f013f")
     val managed = NonEmptyList(node1, node2)
-  
+
     val time1: Epoch = epoch"2017-03-03T18:07:00Z"
     val time2: Epoch = epoch"2017-03-03T18:59:00Z" // +52 mins
     val time3: Epoch = epoch"2017-03-03T19:06:00Z" // +59 mins
     val time4: Epoch = epoch"2017-03-03T23:07:00Z" // +5 hours
-  
+
     val needsAgents = WorldView(5, 0, managed, Map.empty, Map.empty, time1)
   }
   import Data._
-~~~~~~~~
+```
 
 A> The `epoch` string interpolator is written with Jon Pretty's [contextual](https://github.com/propensive/contextual) library,
 A> giving us compiletime safety around string constructors of a type:
@@ -1011,15 +1119,16 @@ isolated the state of our system, so we can use `var` to store the
 state:
 
 {lang="text"}
-~~~~~~~~
+
+```
   class Mutable(state: WorldView) {
     var started, stopped: Int = 0
-  
+
     private val D: Drone[Id] = new Drone[Id] {
       def getBacklog: Int = state.backlog
       def getAgents: Int = state.agents
     }
-  
+
     private val M: Machines[Id] = new Machines[Id] {
       def getAlive: Map[MachineNode, Epoch] = state.alive
       def getManaged: NonEmptyList[MachineNode] = state.managed
@@ -1027,10 +1136,10 @@ state:
       def start(node: MachineNode): MachineNode = { started += 1 ; node }
       def stop(node: MachineNode): MachineNode = { stopped += 1 ; node }
     }
-  
+
     val program = new DynAgentsModule[Id](D, M)
   }
-~~~~~~~~
+```
 
 A> We will return to this code later on and replace `var` with something safer.
 
@@ -1045,56 +1154,58 @@ In this trivial case we just check that the `initial` method returns
 the same value that we use in the static implementations:
 
 {lang="text"}
-~~~~~~~~
+
+```
   "Business Logic" should "generate an initial world view" in {
     val mutable = new Mutable(needsAgents)
     import mutable._
-  
+
     program.initial shouldBe needsAgents
   }
-~~~~~~~~
+```
 
 We can create more advanced tests of the `update` and `act` methods,
 helping us flush out bugs and refine the requirements:
 
 {lang="text"}
-~~~~~~~~
+
+```
   it should "remove changed nodes from pending" in {
     val world = WorldView(0, 0, managed, Map(node1 -> time3), Map.empty, time3)
     val mutable = new Mutable(world)
     import mutable._
-  
+
     val old = world.copy(alive = Map.empty,
                          pending = Map(node1 -> time2),
                          time = time2)
     program.update(old) shouldBe world
   }
-  
+
   it should "request agents when needed" in {
     val mutable = new Mutable(needsAgents)
     import mutable._
-  
+
     val expected = needsAgents.copy(
       pending = Map(node1 -> time1)
     )
-  
+
     program.act(needsAgents) shouldBe expected
-  
+
     mutable.stopped shouldBe 0
     mutable.started shouldBe 1
   }
-~~~~~~~~
+```
 
 It would be boring to go through the full test suite. The following tests are
 easy to implement using the same approach:
 
--   not request agents when pending
--   don't shut down agents if nodes are too young
--   shut down agents when there is no backlog and nodes will shortly incur new costs
--   not shut down agents if there are pending actions
--   shut down agents when there is no backlog if they are too old
--   shut down agents, even if they are potentially doing work, if they are too old
--   ignore unresponsive pending actions during update
+- not request agents when pending
+- don't shut down agents if nodes are too young
+- shut down agents when there is no backlog and nodes will shortly incur new costs
+- not shut down agents if there are pending actions
+- shut down agents when there is no backlog if they are too old
+- shut down agents, even if they are potentially doing work, if they are too old
+- ignore unresponsive pending actions during update
 
 All of these tests are synchronous and isolated to the test runner's
 thread (which could be running tests in parallel). If we'd designed
@@ -1106,13 +1217,11 @@ overstated. Consider that 90% of an application developer's time
 interacting with the customer is in refining, updating and fixing
 these business rules. Everything else is implementation detail.
 
-
 ## Parallel
 
 The application that we have designed runs each of its algebraic
 methods sequentially. But there are some obvious places where work can
 be performed in parallel.
-
 
 ### initial
 
@@ -1123,29 +1232,31 @@ As opposed to `flatMap` for sequential operations, Scalaz uses
 `Apply` syntax for parallel operations:
 
 {lang="text"}
-~~~~~~~~
+
+```
   ^^^^(D.getBacklog, D.getAgents, M.getManaged, M.getAlive, M.getTime)
-~~~~~~~~
+```
 
 which can also use infix notation:
 
 {lang="text"}
-~~~~~~~~
+
+```
   (D.getBacklog |@| D.getAgents |@| M.getManaged |@| M.getAlive |@| M.getTime)
-~~~~~~~~
+```
 
 If each of the parallel operations returns a value in the same monadic
 context, we can apply a function to the results when they all return.
 Rewriting `initial` to take advantage of this:
 
 {lang="text"}
-~~~~~~~~
+
+```
   def initial: F[WorldView] =
     ^^^^(D.getBacklog, D.getAgents, M.getManaged, M.getAlive, M.getTime) {
       case (db, da, mm, ma, mt) => WorldView(db, da, mm, ma, Map.empty, mt)
     }
-~~~~~~~~
-
+```
 
 ### act
 
@@ -1166,25 +1277,24 @@ when we `flatMap` over it we get a `NonEmptyList[MachineNode]` that we
 can deal with in a simple way:
 
 {lang="text"}
-~~~~~~~~
+
+```
   for {
     stopped <- nodes.traverse(M.stop)
     updates = stopped.map(_ -> world.time).toList.toMap
     update = world.copy(pending = world.pending ++ updates)
   } yield update
-~~~~~~~~
+```
 
 Arguably, this is easier to understand than the sequential version.
 
-
 ## Summary
 
-1.  *algebras* define the interface between systems.
-2.  *modules* are implementations of an algebra in terms of other algebras.
-3.  *interpreters* are concrete implementations of an algebra for a fixed `F[_]`.
-4.  Test interpreters can replace the side-effecting parts of the system,
-    giving a high amount of test coverage.
-
+1. *algebras* define the interface between systems.
+2. *modules* are implementations of an algebra in terms of other algebras.
+3. *interpreters* are concrete implementations of an algebra for a fixed `F[_]`.
+4. Test interpreters can replace the side-effecting parts of the system,
+   giving a high amount of test coverage.
 
 # Data and Functionality
 
@@ -1204,14 +1314,13 @@ language. We will also discover *typeclasses* as a way to achieve
 compiletime polymorphism: thinking about functionality of a data
 structure in terms of "has a" rather than "is a" relationships.
 
-
 ## Data
 
 The fundamental building blocks of data types are
 
--   `final case class` also known as *products*
--   `sealed abstract class` also known as *coproducts*
--   `case object` and `Int`, `Double`, `String` (etc) *values*
+- `final case class` also known as *products*
+- `sealed abstract class` also known as *coproducts*
+- `case object` and `Int`, `Double`, `String` (etc) *values*
 
 with no methods or fields other than the constructor parameters. We prefer
 `abstract class` to `trait` in order to get better binary compatibility and to
@@ -1224,28 +1333,28 @@ We compose data types from the `AND` and `XOR` (exclusive `OR`)
 Boolean algebra: a product contains every type that it is composed of,
 but a coproduct can be only one. For example
 
--   product: `ABC = a AND b AND c`
--   coproduct: `XYZ = x XOR y XOR z`
+- product: `ABC = a AND b AND c`
+- coproduct: `XYZ = x XOR y XOR z`
 
 written in Scala
 
 {lang="text"}
-~~~~~~~~
+
+```
   // values
   case object A
   type B = String
   type C = Int
-  
+
   // product
   final case class ABC(a: A.type, b: B, c: C)
-  
+
   // coproduct
   sealed abstract class XYZ
   case object X extends XYZ
   case object Y extends XYZ
   final case class Z(b: B) extends XYZ
-~~~~~~~~
-
+```
 
 ### Recursive ADTs
 
@@ -1255,21 +1364,22 @@ When an ADT refers to itself, we call it a *Recursive Algebraic Data Type*.
 `ICons` contains a reference to `IList`.:
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed abstract class IList[A]
   final case class INil[A]() extends IList[A]
   final case class ICons[A](head: A, tail: IList[A]) extends IList[A]
-~~~~~~~~
-
+```
 
 ### Functions on ADTs
 
 ADTs can contain *pure functions*
 
 {lang="text"}
-~~~~~~~~
+
+```
   final case class UserConfiguration(accepts: Int => Boolean)
-~~~~~~~~
+```
 
 But ADTs that contain functions come with some caveats as they don't
 translate perfectly onto the JVM. For example, legacy `Serializable`,
@@ -1287,7 +1397,6 @@ We will explore alternatives to the legacy methods when we discuss the
 Scalaz library in the next chapter, at the cost of losing
 interoperability with some legacy Java and Scala code.
 
-
 ### Exhaustivity
 
 It is important that we use `sealed abstract class`, not just
@@ -1297,11 +1406,12 @@ compiler to know about them in pattern match exhaustivity checks and
 in macros that eliminate boilerplate. e.g.
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> sealed abstract class Foo
          final case class Bar(flag: Boolean) extends Foo
          final case object Baz extends Foo
-  
+
   scala> def thing(foo: Foo) = foo match {
            case Bar(_) => true
          }
@@ -1309,7 +1419,7 @@ in macros that eliminate boilerplate. e.g.
   It would fail on the following input: Baz
          def thing(foo: Foo) = foo match {
                                ^
-~~~~~~~~
+```
 
 This shows the developer what they have broken when they add a new
 product to the codebase. We're using `-Xfatal-warnings`, otherwise
@@ -1319,21 +1429,21 @@ However, the compiler will not perform exhaustivity checking if the
 `class` is not sealed or if there are guards, e.g.
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> def thing(foo: Foo) = foo match {
            case Bar(flag) if flag => true
          }
-  
+
   scala> thing(Baz)
   scala.MatchError: Baz (of class Baz$)
     at .thing(<console>:15)
-~~~~~~~~
+```
 
 To remain safe, don't use guards on `sealed` types.
 
 The [`-Xstrict-patmat-analysis`](https://github.com/scala/scala/pull/5617) flag has been proposed as a language
 improvement to perform additional pattern matcher checks.
-
 
 ### Alternative Products and Coproducts
 
@@ -1347,45 +1457,48 @@ to deal with, and `case class` has much better performance for primitive values.
 Another form of coproduct is when we nest `Either` types. e.g.
 
 {lang="text"}
-~~~~~~~~
+
+```
   Either[X.type, Either[Y.type, Z]]
-~~~~~~~~
+```
 
 equivalent to the `XYZ` sealed abstract class. A cleaner syntax to define
 nested `Either` types is to create an alias type ending with a colon,
 allowing infix notation with association from the right:
 
 {lang="text"}
-~~~~~~~~
+
+```
   type |:[L,R] = Either[L, R]
-  
+
   X.type |: Y.type |: Z
-~~~~~~~~
+```
 
 This is useful to create anonymous coproducts when we cannot put all
 the implementations into the same source file.
 
 {lang="text"}
-~~~~~~~~
+
+```
   type Accepted = String |: Long |: Boolean
-~~~~~~~~
+```
 
 Yet another alternative coproduct is to create a custom `sealed abstract class`
 with `final case class` definitions that simply wrap the desired type:
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed abstract class Accepted
   final case class AcceptedString(value: String) extends Accepted
   final case class AcceptedLong(value: Long) extends Accepted
   final case class AcceptedBoolean(value: Boolean) extends Accepted
-~~~~~~~~
+```
 
 Pattern matching on these forms of coproduct can be tedious, which is why [Union
 Types](https://contributors.scala-lang.org/t/733) are being explored in the Dotty next-generation Scala compiler. Macros
 such as [totalitarian](https://github.com/propensive/totalitarian) and [iotaz](https://github.com/frees-io/iota) exist as alternative ways of encoding anonymous
 coproducts.
-
 
 ### Convey Information
 
@@ -1393,9 +1506,10 @@ Besides being a container for necessary business information, data
 types can be used to encode constraints. For example,
 
 {lang="text"}
-~~~~~~~~
+
+```
   final case class NonEmptyList[A](head: A, tail: IList[A])
-~~~~~~~~
+```
 
 can never be empty. This makes `scalaz.NonEmptyList` a useful data type despite
 containing the same information as `IList`.
@@ -1404,18 +1518,20 @@ Product types often contain types that are far more general than is allowed. In
 traditional OOP this would be handled with input validation through assertions:
 
 {lang="text"}
-~~~~~~~~
+
+```
   final case class Person(name: String, age: Int) {
     require(name.nonEmpty && age > 0) // breaks Totality, don't do this!
   }
-~~~~~~~~
+```
 
 Instead, we can use the `Either` data type to provide `Right[Person]` for valid
 instances and protect invalid instances from propagating. Note that the
 constructor is `private`:
 
 {lang="text"}
-~~~~~~~~
+
+```
   final case class Person private(name: String, age: Int)
   object Person {
     def apply(name: String, age: Int): Either[String, Person] = {
@@ -1423,15 +1539,14 @@ constructor is `private`:
       else Left(s"bad input: $name, $age")
     }
   }
-  
+
   def welcome(person: Person): String =
     s"${person.name} you look wonderful at ${person.age}!"
-  
+
   for {
     person <- Person("", -1)
   } yield welcome(person)
-~~~~~~~~
-
+```
 
 #### Refined Data Types
 
@@ -1440,17 +1555,19 @@ library, providing a suite of restrictions to the contents of data. To install
 refined, add the following to `build.sbt`
 
 {lang="text"}
-~~~~~~~~
+
+```
   libraryDependencies += "eu.timepit" %% "refined-scalaz" % "0.9.2"
-~~~~~~~~
+```
 
 and the following imports
 
 {lang="text"}
-~~~~~~~~
+
+```
   import eu.timepit.refined
   import refined.api.Refined
-~~~~~~~~
+```
 
 `Refined` allows us to define `Person` using adhoc refined types to capture
 requirements exactly, written `A Refined B`.
@@ -1461,70 +1578,76 @@ A> `Refined` to be written infix since `A Refined B` can be read as "an `A` that
 A> meets the requirements defined in `B`".
 
 {lang="text"}
-~~~~~~~~
+
+```
   import refined.numeric.Positive
   import refined.collection.NonEmpty
-  
+
   final case class Person(
     name: String Refined NonEmpty,
     age: Int Refined Positive
   )
-~~~~~~~~
+```
 
 The underlying value can be obtained with `.value`. We can construct a
 value at runtime using `.refineV`, returning an `Either`
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> import refined.refineV
   scala> refineV[NonEmpty]("")
   Left(Predicate isEmpty() did not fail.)
-  
+
   scala> refineV[NonEmpty]("Sam")
   Right(Sam)
-~~~~~~~~
+```
 
 If we add the following import
 
 {lang="text"}
-~~~~~~~~
+
+```
   import refined.auto._
-~~~~~~~~
+```
 
 we can construct valid values at compiletime and get an error if the provided
 value does not meet the requirements
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> val sam: String Refined NonEmpty = "Sam"
   Sam
-  
+
   scala> val empty: String Refined NonEmpty = ""
   <console>:21: error: Predicate isEmpty() did not fail.
-~~~~~~~~
+```
 
 More complex requirements can be captured, for example we can use the built-in
 rule `MaxSize` with the following imports
 
 {lang="text"}
-~~~~~~~~
+
+```
   import refined.W
   import refined.boolean.And
   import refined.collection.MaxSize
-~~~~~~~~
+```
 
 capturing the requirement that the `String` must be both non-empty and have a
 maximum size of 10 characters:
 
 {lang="text"}
-~~~~~~~~
+
+```
   type Name = NonEmpty And MaxSize[W.`10`.T]
-  
+
   final case class Person(
     name: String Refined Name,
     age: Int Refined Positive
   )
-~~~~~~~~
+```
 
 A> The `W` notation is short for "witness". This syntax will be much simpler in
 A> Scala 2.13, which has support for *literal types*:
@@ -1540,12 +1663,13 @@ that a `String` contains `application/x-www-form-urlencoded` content. We can
 create a `Refined` rule using the Java regular expression library:
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed abstract class UrlEncoded
   object UrlEncoded {
     private[this] val valid: Pattern =
       Pattern.compile("\\A(\\p{Alnum}++|[-.*_+=&]++|%\\p{XDigit}{2})*\\z")
-  
+
     implicit def urlValidate: Validate.Plain[String, UrlEncoded] =
       Validate.fromPredicate(
         s => valid.matcher(s).find(),
@@ -1553,8 +1677,7 @@ create a `Refined` rule using the Java regular expression library:
         new UrlEncoded {}
       )
   }
-~~~~~~~~
-
+```
 
 ### Simple to Share
 
@@ -1568,7 +1691,6 @@ hand written document as the source of truth.
 Furthermore, tooling can be more easily written to produce or consume
 schemas from other programming languages and wire protocols.
 
-
 ### Counting Complexity
 
 The complexity of a data type is the count of values that can exist. A good data
@@ -1577,27 +1699,27 @@ conveys, and no more.
 
 Values have a built-in complexity:
 
--   `Unit` has one value (why it is called "unit")
--   `Boolean` has two values
--   `Int` has 4,294,967,295 values
--   `String` has effectively infinite values
+- `Unit` has one value (why it is called "unit")
+- `Boolean` has two values
+- `Int` has 4,294,967,295 values
+- `String` has effectively infinite values
 
 To find the complexity of a product, we multiply the complexity of
 each part.
 
--   `(Boolean, Boolean)` has 4 values (`2*2`)
--   `(Boolean, Boolean, Boolean)` has 8 values (`2*2*2`)
+- `(Boolean, Boolean)` has 4 values (`2*2`)
+- `(Boolean, Boolean, Boolean)` has 8 values (`2*2*2`)
 
 To find the complexity of a coproduct, we add the complexity of each
 part.
 
--   `(Boolean |: Boolean)` has 4 values (`2+2`)
--   `(Boolean |: Boolean |: Boolean)` has 6 values (`2+2+2`)
+- `(Boolean |: Boolean)` has 4 values (`2+2`)
+- `(Boolean |: Boolean |: Boolean)` has 6 values (`2+2+2`)
 
 To find the complexity of a ADT with a type parameter, multiply each part by the
 complexity of the type parameter:
 
--   `Option[Boolean]` has 3 values, `Some[Boolean]` and `None` (`2+1`)
+- `Option[Boolean]` has 3 values, `Some[Boolean]` and `None` (`2+1`)
 
 In FP, functions are *total* and must return an value for every
 input, no `Exception`. Minimising the complexity of inputs and outputs
@@ -1609,12 +1731,12 @@ of entropy.
 The complexity of a total function is the number of possible functions that can
 satisfy the type signature: the output to the power of the input.
 
--   `Unit => Boolean` has complexity 2
--   `Boolean => Boolean` has complexity 4
--   `Option[Boolean] => Option[Boolean]` has complexity 27
--   `Boolean => Int` is a mere quintillion going on a sextillion.
--   `Int => Boolean` is so big that if all implementations were assigned a unique
-    number, each would require 4 gigabytes to represent.
+- `Unit => Boolean` has complexity 2
+- `Boolean => Boolean` has complexity 4
+- `Option[Boolean] => Option[Boolean]` has complexity 27
+- `Boolean => Int` is a mere quintillion going on a sextillion.
+- `Int => Boolean` is so big that if all implementations were assigned a unique
+  number, each would require 4 gigabytes to represent.
 
 In reality, `Int => Boolean` will be something simple like `isOdd`, `isEven` or
 a sparse `BitSet`. This function, when used in an ADT, could be better replaced
@@ -1628,34 +1750,37 @@ The ability to count the complexity of a type signature has one other practical
 application: we can find simpler type signatures with High School algebra! To go
 from a type signature to its algebra of complexity, simply replace
 
--   `Either[A, B]` with `a + b`
--   `(A, B)` with `a * b`
--   `A => B` with `b ^ a`
+- `Either[A, B]` with `a + b`
+- `(A, B)` with `a * b`
+- `A => B` with `b ^ a`
 
 do some rearranging, and convert back. For example, say we've designed a
 framework based on callbacks and we've managed to work ourselves into the
 situation where we have created this type signature:
 
 {lang="text"}
-~~~~~~~~
+
+```
   (A => C) => ((B => C) => C)
-~~~~~~~~
+```
 
 We can convert and rearrange
 
 {lang="text"}
-~~~~~~~~
+
+```
   (c ^ (c ^ b)) ^ (c ^ a)
   = c ^ ((c ^ b) * (c ^ a))
   = c ^ (c ^ (a + b))
-~~~~~~~~
+```
 
 then convert back to types and get
 
 {lang="text"}
-~~~~~~~~
+
+```
   (Either[A, B] => C) => C
-~~~~~~~~
+```
 
 which is much simpler: we only need to ask the users of our framework to provide
 a `Either[A, B] => C`.
@@ -1663,19 +1788,20 @@ a `Either[A, B] => C`.
 The same line of reasoning can be used to prove that
 
 {lang="text"}
-~~~~~~~~
+
+```
   A => B => C
-~~~~~~~~
+```
 
 is equivalent to
 
 {lang="text"}
-~~~~~~~~
+
+```
   (A, B) => C
-~~~~~~~~
+```
 
 also known as *Currying*.
-
 
 ### Prefer Coproduct over Product
 
@@ -1685,14 +1811,15 @@ product `(a: Boolean, b: Boolean, c: Boolean)` has complexity 8
 whereas the coproduct
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed abstract class Config
   object Config {
     case object A extends Config
     case object B extends Config
     case object C extends Config
   }
-~~~~~~~~
+```
 
 has a complexity of 3. It is better to model these configuration
 parameters as a coproduct rather than allowing 5 invalid states to
@@ -1703,7 +1830,6 @@ practically impossible to test every possible input to a function, but it is
 easy to test a sample of values with the [Scalacheck](https://www.scalacheck.org/) property testing framework.
 If a random sample of a data type has a low probability of being valid, it is a
 sign that the data is modelled incorrectly.
-
 
 ### Optimisations
 
@@ -1719,20 +1845,20 @@ These optimisations are not applicable to OOP `class` hierarchies that
 may be managing state, throwing exceptions, or providing adhoc method
 implementations.
 
-
 ## Functionality
 
 Pure functions are typically defined as methods on an `object`.
 
 {lang="text"}
-~~~~~~~~
+
+```
   package object math {
     def sin(x: Double): Double = java.lang.Math.sin(x)
     ...
   }
-  
+
   math.sin(1.0)
-~~~~~~~~
+```
 
 However, it can be clunky to use `object` methods since it reads
 inside-out, not left to right. In addition, a function on an `object`
@@ -1750,24 +1876,26 @@ methodology* or *syntax*), and a little boilerplate, we can get the
 familiar style:
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> implicit class DoubleOps(x: Double) {
            def sin: Double = math.sin(x)
          }
-  
+
   scala> (1.0).sin
   res: Double = 0.8414709848078965
-~~~~~~~~
+```
 
 Often it is best to just skip the `object` definition and go straight
 for an `implicit class`, keeping boilerplate to a minimum:
 
 {lang="text"}
-~~~~~~~~
+
+```
   implicit class DoubleOps(x: Double) {
     def sin: Double = java.lang.Math.sin(x)
   }
-~~~~~~~~
+```
 
 A> `implicit class` is syntax sugar for an implicit conversion:
 A> 
@@ -1793,17 +1921,16 @@ A>     def sin: Double = java.lang.Math.sin(x)
 A>   }
 A> ~~~~~~~~
 
-
 ### Polymorphic Functions
 
 The more common kind of function is a polymorphic function, which
 lives in a *typeclass*. A typeclass is a trait that:
 
--   holds no state
--   has a type parameter
--   has at least one abstract method (*primitive combinators*)
--   may contain *generalised* methods (*derived combinators*)
--   may extend other typeclasses
+- holds no state
+- has a type parameter
+- has at least one abstract method (*primitive combinators*)
+- may contain *generalised* methods (*derived combinators*)
+- may extend other typeclasses
 
 There can only be one implementation of a typeclass for any given type
 parameter, a property known as *typeclass coherence*. Typeclasses look
@@ -1824,44 +1951,46 @@ Typeclasses are used in the Scala stdlib. We will explore a simplified
 version of `scala.math.Numeric` to demonstrate the principle:
 
 {lang="text"}
-~~~~~~~~
+
+```
   trait Ordering[T] {
     def compare(x: T, y: T): Int
-  
+
     def lt(x: T, y: T): Boolean = compare(x, y) < 0
     def gt(x: T, y: T): Boolean = compare(x, y) > 0
   }
-  
+
   trait Numeric[T] extends Ordering[T] {
     def plus(x: T, y: T): T
     def times(x: T, y: T): T
     def negate(x: T): T
     def zero: T
-  
+
     def abs(x: T): T = if (lt(x, zero)) negate(x) else x
   }
-~~~~~~~~
+```
 
 We can see all the key features of a typeclass in action:
 
--   there is no state
--   `Ordering` and `Numeric` have type parameter `T`
--   `Ordering` has abstract `compare` and `Numeric` has abstract `plus`,
-    `times`, `negate` and `zero`
--   `Ordering` defines generalised `lt` and `gt` based on `compare`,
-    `Numeric` defines `abs` in terms of `lt`, `negate` and `zero`.
--   `Numeric` extends `Ordering`
+- there is no state
+- `Ordering` and `Numeric` have type parameter `T`
+- `Ordering` has abstract `compare` and `Numeric` has abstract `plus`,
+  `times`, `negate` and `zero`
+- `Ordering` defines generalised `lt` and `gt` based on `compare`,
+  `Numeric` defines `abs` in terms of `lt`, `negate` and `zero`.
+- `Numeric` extends `Ordering`
 
 We can now write functions for types that "have a" `Numeric`
 typeclass:
 
 {lang="text"}
-~~~~~~~~
+
+```
   def signOfTheTimes[T](t: T)(implicit N: Numeric[T]): T = {
     import N._
     times(negate(abs(t)), t)
   }
-~~~~~~~~
+```
 
 We are no longer dependent on the OOP hierarchy of our input types,
 i.e. we don't demand that our input "is a" `Numeric`, which is vitally
@@ -1877,7 +2006,6 @@ of a method, a typeclass method allows us to have a different
 implementation depending on the `List` contents and therefore offload
 work to compiletime instead of leaving it to runtime.
 
-
 ### Syntax
 
 The syntax for writing `signOfTheTimes` is clunky, there are some
@@ -1888,64 +2016,69 @@ since the signature reads cleanly as "takes a `T` that has a
 `Numeric`"
 
 {lang="text"}
-~~~~~~~~
+
+```
   def signOfTheTimes[T: Numeric](t: T): T = ...
-~~~~~~~~
+```
 
 but now we have to use `implicitly[Numeric[T]]` everywhere. By
 defining boilerplate on the companion of the typeclass
 
 {lang="text"}
-~~~~~~~~
+
+```
   object Numeric {
     def apply[T](implicit numeric: Numeric[T]): Numeric[T] = numeric
   }
-~~~~~~~~
+```
 
 we can obtain the implicit with less noise
 
 {lang="text"}
-~~~~~~~~
+
+```
   def signOfTheTimes[T: Numeric](t: T): T = {
     val N = Numeric[T]
     import N._
     times(negate(abs(t)), t)
   }
-~~~~~~~~
+```
 
 But it is still worse for us as the implementors. We have the
 syntactic problem of inside-out static methods vs class methods. We
 deal with this by introducing `ops` on the typeclass companion:
 
 {lang="text"}
-~~~~~~~~
+
+```
   object Numeric {
     def apply[T](implicit numeric: Numeric[T]): Numeric[T] = numeric
-  
+
     object ops {
       implicit class NumericOps[T](t: T)(implicit N: Numeric[T]) {
         def +(o: T): T = N.plus(t, o)
         def *(o: T): T = N.times(t, o)
         def unary_-: T = N.negate(t)
         def abs: T = N.abs(t)
-  
+
         // duplicated from Ordering.ops
         def <(o: T): T = N.lt(t, o)
         def >(o: T): T = N.gt(t, o)
       }
     }
   }
-~~~~~~~~
+```
 
 Note that `-x` is expanded into `x.unary_-` by the compiler's syntax
 sugar, which is why we define `unary_-` as an extension method. We can
 now write the much cleaner:
 
 {lang="text"}
-~~~~~~~~
+
+```
   import Numeric.ops._
   def signOfTheTimes[T: Numeric](t: T): T = -(t.abs) * t
-~~~~~~~~
+```
 
 The good news is that we never need to write this boilerplate because
 [Simulacrum](https://github.com/mpilquist/simulacrum) provides a `@typeclass`
@@ -1954,15 +2087,16 @@ allows us to define alternative (usually symbolic) names for common methods. In
 full:
 
 {lang="text"}
-~~~~~~~~
+
+```
   import simulacrum._
-  
+
   @typeclass trait Ordering[T] {
     def compare(x: T, y: T): Int
     @op("<") def lt(x: T, y: T): Boolean = compare(x, y) < 0
     @op(">") def gt(x: T, y: T): Boolean = compare(x, y) > 0
   }
-  
+
   @typeclass trait Numeric[T] extends Ordering[T] {
     @op("+") def plus(x: T, y: T): T
     @op("*") def times(x: T, y: T): T
@@ -1970,14 +2104,13 @@ full:
     def zero: T
     def abs(x: T): T = if (lt(x, zero)) negate(x) else x
   }
-  
+
   import Numeric.ops._
   def signOfTheTimes[T: Numeric](t: T): T = -(t.abs) * t
-~~~~~~~~
+```
 
 When there is a custom symbolic `@op`, it can be pronounced like its method
 name. e.g. `<` is pronounced "less than", not "left angle bracket".
-
 
 ### Instances
 
@@ -1986,20 +2119,21 @@ defined as an `implicit val` that extends the typeclass, and can
 provide optimised implementations for the generalised methods:
 
 {lang="text"}
-~~~~~~~~
+
+```
   implicit val NumericDouble: Numeric[Double] = new Numeric[Double] {
     def plus(x: Double, y: Double): Double = x + y
     def times(x: Double, y: Double): Double = x * y
     def negate(x: Double): Double = -x
     def zero: Double = 0.0
     def compare(x: Double, y: Double): Int = java.lang.Double.compare(x, y)
-  
+
     // optimised
     override def lt(x: Double, y: Double): Boolean = x < y
     override def gt(x: Double, y: Double): Boolean = x > y
     override def abs(x: Double): Double = java.lang.Math.abs(x)
   }
-~~~~~~~~
+```
 
 Although we are using `+`, `*`, `unary_-`, `<` and `>` here, which are
 the ops (and could be an infinite loop!), these methods exist already
@@ -2012,9 +2146,10 @@ We can also implement `Numeric` for Java's `BigDecimal` class (avoid
 `scala.BigDecimal`, [it is fundamentally broken](https://github.com/scala/bug/issues/9670))
 
 {lang="text"}
-~~~~~~~~
+
+```
   import java.math.{ BigDecimal => BD }
-  
+
   implicit val NumericBD: Numeric[BD] = new Numeric[BD] {
     def plus(x: BD, y: BD): BD = x.add(y)
     def times(x: BD, y: BD): BD = x.multiply(y)
@@ -2022,20 +2157,22 @@ We can also implement `Numeric` for Java's `BigDecimal` class (avoid
     def zero: BD = BD.ZERO
     def compare(x: BD, y: BD): Int = x.compareTo(y)
   }
-~~~~~~~~
+```
 
 We could create our own data structure for complex numbers:
 
 {lang="text"}
-~~~~~~~~
+
+```
   final case class Complex[T](r: T, i: T)
-~~~~~~~~
+```
 
 And derive a `Numeric[Complex[T]]` if `Numeric[T]` exists. Since these
 instances depend on the type parameter, it is a `def`, not a `val`.
 
 {lang="text"}
-~~~~~~~~
+
+```
   implicit def numericComplex[T: Numeric]: Numeric[Complex[T]] =
     new Numeric[Complex[T]] {
       type CT = Complex[T]
@@ -2050,7 +2187,7 @@ instances depend on the type parameter, it is a `def`, not a `val`.
         else Numeric[T].compare(x.i, y.i)
       }
     }
-~~~~~~~~
+```
 
 The observant reader may notice that `abs` is not at all what a
 mathematician would expect. The correct return value for `abs` should
@@ -2060,7 +2197,6 @@ be `T`, not `Complex[T]`.
 beyond real numbers. This is a good lesson that smaller, well defined,
 typeclasses are often better than a monolithic collection of overly
 specific features.
-
 
 ### Implicit Resolution
 
@@ -2078,9 +2214,10 @@ In this example, `foo` requires that typeclass instances of `Numeric` and
 takes two type parameters
 
 {lang="text"}
-~~~~~~~~
+
+```
   def foo[A: Numeric: Typeable](implicit A: Handler[String, A]) = ...
-~~~~~~~~
+```
 
 *Implicit conversion* is when an `implicit def` exists. One such use
 of implicit conversions is to enable extension methodology. When the
@@ -2101,21 +2238,21 @@ conversion (providers) is implicit resolution.
 
 First, the normal variable scope is searched for implicits, in order:
 
--   local scope, including scoped imports (e.g. the block or method)
--   outer scope, including scoped imports (e.g. members in the class)
--   ancestors (e.g. members in the super class)
--   the current package object
--   ancestor package objects (when using nested packages)
--   the file's imports
+- local scope, including scoped imports (e.g. the block or method)
+- outer scope, including scoped imports (e.g. members in the class)
+- ancestors (e.g. members in the super class)
+- the current package object
+- ancestor package objects (when using nested packages)
+- the file's imports
 
 If that fails to find a match, the special scope is searched, which
 looks for implicit instances inside a type's companion, its package
 object, outer objects (if nested), and then repeated for ancestors.
 This is performed, in order, for the:
 
--   given parameter type
--   expected parameter type
--   type parameter (if there is one)
+- given parameter type
+- expected parameter type
+- type parameter (if there is one)
 
 If two matching implicits are found in the same phase of implicit
 resolution, an *ambiguous implicit* error is raised.
@@ -2142,7 +2279,6 @@ parameter using an alias such as `type Values[A] = List[Option[A]]` will
 probably fail to find implicits defined as raw `List[Option[A]]` because the
 shape is changed from a *thing of things* of `A` to a *thing* of `A`.
 
-
 ## Modelling OAuth2
 
 We will finish this chapter with a practical example of data modelling
@@ -2154,16 +2290,16 @@ Google Cloud using JSON over REST. Both services use [OAuth2](https://tools.ietf
 There are many ways to interpret OAuth2, but we will focus on the version that
 works for Google Cloud (the Drone version is even simpler).
 
-
 ### Description
 
 Every Google Cloud application needs to have an *OAuth 2.0 Client Key*
 set up at
 
 {lang="text"}
-~~~~~~~~
+
+```
   https://console.developers.google.com/apis/credentials?project={PROJECT_ID}
-~~~~~~~~
+```
 
 Obtaining a *Client ID* and a *Client secret*.
 
@@ -2172,7 +2308,8 @@ perform an *Authorization Request* in their browser (yes, really, **in
 their browser**). We need to make this page open in the browser:
 
 {lang="text"}
-~~~~~~~~
+
+```
   https://accounts.google.com/o/oauth2/v2/auth?\
     redirect_uri={CALLBACK_URI}&\
     prompt=consent&\
@@ -2180,7 +2317,7 @@ their browser**). We need to make this page open in the browser:
     scope={SCOPE}&\
     access_type=offline&\
     client_id={CLIENT_ID}
-~~~~~~~~
+```
 
 The *code* is delivered to the `{CALLBACK_URI}` in a `GET` request. To
 capture it in our application, we need to have a web server listening
@@ -2189,7 +2326,8 @@ on `localhost`.
 Once we have the *code*, we can perform an *Access Token Request*:
 
 {lang="text"}
-~~~~~~~~
+
+```
   POST /oauth2/v4/token HTTP/1.1
   Host: www.googleapis.com
   Content-length: {CONTENT_LENGTH}
@@ -2201,25 +2339,27 @@ Once we have the *code*, we can perform an *Access Token Request*:
     client_secret={CLIENT_SECRET}&\
     scope={SCOPE}&\
     grant_type=authorization_code
-~~~~~~~~
+```
 
 which gives a JSON response payload
 
 {lang="text"}
-~~~~~~~~
+
+```
   {
     "access_token": "BEARER_TOKEN",
     "token_type": "Bearer",
     "expires_in": 3600,
     "refresh_token": "REFRESH_TOKEN"
   }
-~~~~~~~~
+```
 
 *Bearer tokens* typically expire after an hour, and can be refreshed
 by sending an HTTP request with any valid *refresh token*:
 
 {lang="text"}
-~~~~~~~~
+
+```
   POST /oauth2/v4/token HTTP/1.1
   Host: www.googleapis.com
   Content-length: {CONTENT_LENGTH}
@@ -2229,25 +2369,27 @@ by sending an HTTP request with any valid *refresh token*:
     grant_type=refresh_token&
     refresh_token={REFRESH_TOKEN}&
     client_id={CLIENT_ID}
-~~~~~~~~
+```
 
 responding with
 
 {lang="text"}
-~~~~~~~~
+
+```
   {
     "access_token": "BEARER_TOKEN",
     "token_type": "Bearer",
     "expires_in": 3600
   }
-~~~~~~~~
+```
 
 All userland requests to the server should include the header
 
 {lang="text"}
-~~~~~~~~
+
+```
   Authorization: Bearer BEARER_TOKEN
-~~~~~~~~
+```
 
 after substituting the actual `BEARER_TOKEN`.
 
@@ -2261,7 +2403,6 @@ the headless server.
 Drone doesn't implement the `/auth` endpoint, or the refresh, and simply
 provides a `BEARER_TOKEN` through their user interface.
 
-
 ### Data
 
 The first step is to model the data needed for OAuth2. We create an ADT with
@@ -2270,10 +2411,11 @@ use `String` and `Long` for brevity, but we could use refined types if they leak
 into our business models.
 
 {lang="text"}
-~~~~~~~~
+
+```
   import refined.api.Refined
   import refined.string.Url
-  
+
   final case class AuthRequest(
     redirect_uri: String Refined Url,
     scope: String,
@@ -2307,7 +2449,7 @@ into our business models.
     token_type: String,
     expires_in: Long
   )
-~~~~~~~~
+```
 
 W> Avoid using `java.net.URL` at all costs: it uses DNS to resolve the
 W> hostname part when performing `toString`, `equals` or `hashCode`.
@@ -2324,7 +2466,6 @@ W> That said, in high performance code we would prefer to skip `java.net.URL`
 W> entirely and use a third party URL parser such as [jurl](https://github.com/anthonynsimon/jurl), because even the safe
 W> parts of `java.net.*` are extremely slow at scale.
 
-
 ### Functionality
 
 We need to marshal the data classes we defined in the previous section into
@@ -2337,9 +2478,10 @@ as its primary design objectives. It consists of a JSON AST and encoder /
 decoder typeclasses:
 
 {lang="text"}
-~~~~~~~~
+
+```
   package jsonformat
-  
+
   sealed abstract class JsValue
   final case object JsNull                                    extends JsValue
   final case class JsObject(fields: IList[(String, JsValue)]) extends JsValue
@@ -2348,15 +2490,15 @@ decoder typeclasses:
   final case class JsString(value: String)                    extends JsValue
   final case class JsDouble(value: Double)                    extends JsValue
   final case class JsInteger(value: Long)                     extends JsValue
-  
+
   @typeclass trait JsEncoder[A] {
     def toJson(obj: A): JsValue
   }
-  
+
   @typeclass trait JsDecoder[A] {
     def fromJson(json: JsValue): String \/ A
   }
-~~~~~~~~
+```
 
 A> `\/` is Scalaz's `Either` and has a `.flatMap`. We can use it in `for`
 A> comprehensions, whereas stdlib `Either` does not support `.flatMap` prior to
@@ -2370,19 +2512,21 @@ We need instances of `JsDecoder[AccessResponse]` and `JsDecoder[RefreshResponse]
 We can do this by making use of a helper function:
 
 {lang="text"}
-~~~~~~~~
+
+```
   implicit class JsValueOps(j: JsValue) {
     def getAs[A: JsDecoder](key: String): String \/ A = ...
   }
-~~~~~~~~
+```
 
 We put the instances on the companions of our data types, so that they are
 always in the implicit scope:
 
 {lang="text"}
-~~~~~~~~
+
+```
   import jsonformat._, JsDecoder.ops._
-  
+
   object AccessResponse {
     implicit val json: JsDecoder[AccessResponse] = j =>
       for {
@@ -2392,7 +2536,7 @@ always in the implicit scope:
         ref <- j.getAs[String]("refresh_token")
       } yield AccessResponse(acc, tpe, exp, ref)
   }
-  
+
   object RefreshResponse {
     implicit val json: JsDecoder[RefreshResponse] = j =>
       for {
@@ -2401,12 +2545,13 @@ always in the implicit scope:
         exp <- j.getAs[Long]("expires_in")
       } yield RefreshResponse(acc, tpe, exp)
   }
-~~~~~~~~
+```
 
 We can then parse a string into an `AccessResponse` or a `RefreshResponse`
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> import jsonformat._, JsDecoder.ops._
   scala> val json = JsParser("""
                        {
@@ -2416,46 +2561,48 @@ We can then parse a string into an `AccessResponse` or a `RefreshResponse`
                          "refresh_token": "REFRESH_TOKEN"
                        }
                        """)
-  
+
   scala> json.map(_.as[AccessResponse])
   AccessResponse(BEARER_TOKEN,Bearer,3600,REFRESH_TOKEN)
-~~~~~~~~
+```
 
 We need to write our own typeclasses for URL and POST encoding. The
 following is a reasonable design:
 
 {lang="text"}
-~~~~~~~~
+
+```
   // URL query key=value pairs, in un-encoded form.
   final case class UrlQuery(params: List[(String, String)])
-  
+
   @typeclass trait UrlQueryWriter[A] {
     def toUrlQuery(a: A): UrlQuery
   }
-  
+
   @typeclass trait UrlEncodedWriter[A] {
     def toUrlEncoded(a: A): String Refined UrlEncoded
   }
-~~~~~~~~
+```
 
 We need to provide typeclass instances for basic types:
 
 {lang="text"}
-~~~~~~~~
+
+```
   import java.net.URLEncoder
-  
+
   object UrlEncodedWriter {
     implicit val encoded: UrlEncodedWriter[String Refined UrlEncoded] = identity
-  
+
     implicit val string: UrlEncodedWriter[String] =
       (s => Refined.unsafeApply(URLEncoder.encode(s, "UTF-8")))
-  
+
     implicit val url: UrlEncodedWriter[String Refined Url] =
       (s => s.value.toUrlEncoded)
-  
+
     implicit val long: UrlEncodedWriter[Long] =
       (s => Refined.unsafeApply(s.toString))
-  
+
     implicit def ilist[K: UrlEncodedWriter, V: UrlEncodedWriter]
       : UrlEncodedWriter[IList[(K, V)]] = { m =>
       val raw = m.map {
@@ -2463,9 +2610,9 @@ We need to provide typeclass instances for basic types:
       }.intercalate("&")
       Refined.unsafeApply(raw) // by deduction
     }
-  
+
   }
-~~~~~~~~
+```
 
 We use `Refined.unsafeApply` when we can logically deduce that the contents of
 the string are already url encoded, bypassing any further checks.
@@ -2521,7 +2668,8 @@ we have already written, but for now we will write the boilerplate for the types
 we wish to convert:
 
 {lang="text"}
-~~~~~~~~
+
+```
   import UrlEncodedWriter.ops._
   object AuthRequest {
     implicit val query: UrlQueryWriter[AuthRequest] = { a =>
@@ -2556,8 +2704,7 @@ we wish to convert:
       ).toUrlEncoded
     }
   }
-~~~~~~~~
-
+```
 
 ### Module
 
@@ -2571,61 +2718,65 @@ responses must have a `JsDecoder` and our `POST` payload must have a
 `UrlEncodedWriter`:
 
 {lang="text"}
-~~~~~~~~
+
+```
   trait JsonClient[F[_]] {
     def get[A: JsDecoder](
       uri: String Refined Url,
       headers: IList[(String, String)]
     ): F[A]
-  
+
     def post[P: UrlEncodedWriter, A: JsDecoder](
       uri: String Refined Url,
       payload: P,
       headers: IList[(String, String] = IList.empty
     ): F[A]
   }
-~~~~~~~~
+```
 
 Note that we only define the happy path in the `JsonClient` API. We will get
 around to error handling in a later chapter.
 
 Obtaining a `CodeToken` from the Google `OAuth2` server involves
 
-1.  starting an HTTP server on the local machine, and obtaining its port number.
-2.  making the user open a web page in their browser, which allows them to log in
-    with their Google credentials and authorise the application, with a redirect
-    back to the local machine.
-3.  capturing the code, informing the user of next steps, and closing the HTTP
-    server.
+1. starting an HTTP server on the local machine, and obtaining its port number.
+2. making the user open a web page in their browser, which allows them to log in
+   with their Google credentials and authorise the application, with a redirect
+   back to the local machine.
+3. capturing the code, informing the user of next steps, and closing the HTTP
+   server.
 
 We can model this with three methods on a `UserInteraction` algebra.
 
 {lang="text"}
-~~~~~~~~
+
+```
   final case class CodeToken(token: String, redirect_uri: String Refined Url)
-  
+
   trait UserInteraction[F[_]] {
     def start: F[String Refined Url]
     def open(uri: String Refined Url): F[Unit]
     def stop: F[CodeToken]
   }
-~~~~~~~~
+```
 
 It almost sounds easy when put like that.
 
 We also need an algebra to abstract over the local system time
 
 {lang="text"}
-~~~~~~~~
+
+```
   trait LocalClock[F[_]] {
     def now: F[Epoch]
   }
-~~~~~~~~
+```
 
 And introduce data types that we will use in the refresh logic
 
 {lang="text"}
-~~~~~~~~
+
+```
   final case class ServerConfig(
     auth: String Refined Url,
     access: String Refined Url,
@@ -2636,14 +2787,15 @@ And introduce data types that we will use in the refresh logic
   )
   final case class RefreshToken(token: String)
   final case class BearerToken(token: String, expires: Epoch)
-~~~~~~~~
+```
 
 Now we can write an OAuth2 client module:
 
 {lang="text"}
-~~~~~~~~
+
+```
   import http.encoding.UrlQueryWriter.ops._
-  
+
   class OAuth2Client[F[_]: Monad](
     config: ServerConfig
   )(
@@ -2658,7 +2810,7 @@ Now we can write an OAuth2 client module:
         _        <- user.open(params.toUrlQuery.forUrl(config.auth))
         code     <- user.stop
       } yield code
-  
+
     def access(code: CodeToken): F[(RefreshToken, BearerToken)] =
       for {
         request <- AccessRequest(code.token,
@@ -2672,7 +2824,7 @@ Now we can write an OAuth2 client module:
         refresh = RefreshToken(msg.refresh_token)
         bearer  = BearerToken(msg.access_token, expires)
       } yield (refresh, bearer)
-  
+
     def bearer(refresh: RefreshToken): F[BearerToken] =
       for {
         request <- RefreshRequest(config.clientSecret,
@@ -2685,24 +2837,22 @@ Now we can write an OAuth2 client module:
         bearer  = BearerToken(msg.access_token, expires)
       } yield bearer
   }
-~~~~~~~~
-
+```
 
 ## Summary
 
--   *algebraic data types* (ADTs) are defined as *products* (`final case class`)
-    and *coproducts* (`sealed abstract class`).
--   `Refined` types enforce constraints on values.
--   concrete functions can be defined in an `implicit class` to maintain
-    left-to-right flow.
--   polymorphic functions are defined in *typeclasses*. Functionality is provided
-    via "has a" *context bounds*, rather than "is a" class hierarchies.
--   typeclass *instances* are implementations of a typeclass.
--   `@simulacrum.typeclass` generates `.ops` on the companion, providing
-    convenient syntax for typeclass functions.
--   *typeclass derivation* is compiletime composition of typeclass
-    instances.
-
+- *algebraic data types* (ADTs) are defined as *products* (`final case class`)
+  and *coproducts* (`sealed abstract class`).
+- `Refined` types enforce constraints on values.
+- concrete functions can be defined in an `implicit class` to maintain
+  left-to-right flow.
+- polymorphic functions are defined in *typeclasses*. Functionality is provided
+  via "has a" *context bounds*, rather than "is a" class hierarchies.
+- typeclass *instances* are implementations of a typeclass.
+- `@simulacrum.typeclass` generates `.ops` on the companion, providing
+  convenient syntax for typeclass functions.
+- *typeclass derivation* is compiletime composition of typeclass
+  instances.
 
 # Scalaz Typeclasses
 
@@ -2721,7 +2871,7 @@ most important methods from a control flow perspective: the methods we
 will use the most in typical FP applications:
 
 | Typeclass     | Method     | From      | Given       | To        |
-|------------- |---------- |--------- |----------- |--------- |
+| ------------- | ---------- | --------- | ----------- | --------- |
 | `Functor`     | `map`      | `F[A]`    | `A => B`    | `F[B]`    |
 | `Applicative` | `pure`     | `A`       |             | `F[A]`    |
 | `Monad`       | `flatMap`  | `F[A]`    | `A => F[B]` | `F[B]`    |
@@ -2753,7 +2903,6 @@ from a single value.
 but need a `G[F[_]]`, e.g. `List[Future[Int]]` but need a `Future[List[Int]]`,
 that is `.sequence`.
 
-
 ## Agenda
 
 This chapter is longer than usual and jam-packed with information: it is
@@ -2778,29 +2927,29 @@ scalaz source code.
 {width=60%}
 ![](images/scalaz-core-loners.png)
 
-
 ## Appendable Things
 
 {width=25%}
 ![](images/scalaz-semigroup.png)
 
 {lang="text"}
-~~~~~~~~
+
+```
   @typeclass trait Semigroup[A] {
     @op("|+|") def append(x: A, y: =>A): A
-  
+
     def multiply1(value: F, n: Int): F = ...
   }
-  
+
   @typeclass trait Monoid[A] extends Semigroup[A] {
     def zero: A
-  
+
     def multiply(value: F, n: Int): F =
       if (n <= 0) zero else multiply1(value, n - 1)
   }
-  
+
   @typeclass trait Band[A] extends Semigroup[A]
-~~~~~~~~
+```
 
 A> `|+|` is known as the TIE Fighter operator. There is an Advanced TIE
 A> Fighter in an upcoming section, which is very exciting.
@@ -2810,34 +2959,37 @@ operation must be *associative*, meaning that the order of nested operations
 should not matter, i.e.
 
 {lang="text"}
-~~~~~~~~
+
+```
   (a |+| b) |+| c == a |+| (b |+| c)
-  
+
   (1 |+| 2) |+| 3 == 1 |+| (2 |+| 3)
-~~~~~~~~
+```
 
 A `Monoid` is a `Semigroup` with a *zero* element (also called *empty*
 or *identity*). Combining `zero` with any other `a` should give `a`.
 
 {lang="text"}
-~~~~~~~~
+
+```
   a |+| zero == a
-  
+
   a |+| 0 == a
-~~~~~~~~
+```
 
 This is probably bringing back memories of `Numeric` from Chapter 4. There are
 implementations of `Monoid` for all the primitive numbers, but the concept of
 *appendable* things is useful beyond numbers.
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> "hello" |+| " " |+| "world!"
   res: String = "hello world!"
-  
+
   scala> List(1, 2) |+| List(3, 4)
   res: List[Int] = List(1, 2, 3, 4)
-~~~~~~~~
+```
 
 `Band` has the law that the `append` operation of the same two
 elements is *idempotent*, i.e. gives the same value. Examples are
@@ -2861,26 +3013,28 @@ but keep in mind that a realistic system would have a more complicated
 ADT.
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed abstract class Currency
   case object EUR extends Currency
   case object USD extends Currency
-  
+
   final case class TradeTemplate(
     payments: List[java.time.LocalDate],
     ccy: Option[Currency],
     otc: Option[Boolean]
   )
-~~~~~~~~
+```
 
 If we write a method that takes `templates: List[TradeTemplate]`, we
 only need to call
 
 {lang="text"}
-~~~~~~~~
+
+```
   val zero = Monoid[TradeTemplate].zero
   templates.foldLeft(zero)(_ |+| _)
-~~~~~~~~
+```
 
 and our job is done!
 
@@ -2889,7 +3043,8 @@ But to get `zero` or call `|+|` we must have an instance of
 later chapter, for now we will create an instance on the companion:
 
 {lang="text"}
-~~~~~~~~
+
+```
   object TradeTemplate {
     implicit val monoid: Monoid[TradeTemplate] = Monoid.instance(
       (a, b) => TradeTemplate(a.payments |+| b.payments,
@@ -2898,24 +3053,26 @@ later chapter, for now we will create an instance on the companion:
       TradeTemplate(Nil, None, None)
     )
   }
-~~~~~~~~
+```
 
 However, this doesn't do what we want because `Monoid[Option[A]]` will append
 its contents, e.g.
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> Option(2) |+| None
   res: Option[Int] = Some(2)
   scala> Option(2) |+| Option(1)
   res: Option[Int] = Some(3)
-~~~~~~~~
+```
 
 whereas we want "last rule wins". We can override the default
 `Monoid[Option[A]]` with our own:
 
 {lang="text"}
-~~~~~~~~
+
+```
   implicit def lastWins[A]: Monoid[Option[A]] = Monoid.instance(
     {
       case (None, None)   => None
@@ -2925,12 +3082,13 @@ whereas we want "last rule wins". We can override the default
     },
     None
   )
-~~~~~~~~
+```
 
 Now everything compiles, let's try it out...
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> import java.time.{LocalDate => LD}
   scala> val templates = List(
            TradeTemplate(Nil,                     None,      None),
@@ -2939,13 +3097,13 @@ Now everything compiles, let's try it out...
            TradeTemplate(List(LD.of(2017, 9, 5)), None,      Some(true)),
            TradeTemplate(Nil,                     None,      Some(false))
          )
-  
+
   scala> templates.foldLeft(zero)(_ |+| _)
   res: TradeTemplate = TradeTemplate(
                          List(2017-08-05,2017-09-05),
                          Some(USD),
                          Some(false))
-~~~~~~~~
+```
 
 All we needed to do was implement one piece of business logic and
 `Monoid` took care of everything else for us!
@@ -2971,7 +3129,6 @@ A> better way: using `LastOption` instead of `Option` in our data model.
 A> 
 A> Please don't break typeclass coherence at home, kids.
 
-
 ## Objecty Things
 
 In the chapter on Data and Functionality we said that the JVM's notion
@@ -2988,12 +3145,13 @@ concept of equality is captured at compiletime.
 ![](images/scalaz-comparable.png)
 
 {lang="text"}
-~~~~~~~~
+
+```
   @typeclass trait Equal[F]  {
     @op("===") def equal(a1: F, a2: F): Boolean
     @op("/==") def notEqual(a1: F, a2: F): Boolean = !equal(a1, a2)
   }
-~~~~~~~~
+```
 
 Indeed `===` (*triple equals*) is more typesafe than `==` (*double
 equals*) because it can only be compiled when the types are the same
@@ -3001,9 +3159,9 @@ on both sides of the comparison. This catches a lot of bugs.
 
 `equal` has the same implementation requirements as `Object.equals`
 
--   *commutative* `f1 === f2` implies `f2 === f1`
--   *reflexive* `f === f`
--   *transitive* `f1 === f2 && f2 === f3` implies `f1 === f3`
+- *commutative* `f1 === f2` implies `f2 === f1`
+- *reflexive* `f === f`
+- *transitive* `f1 === f2 && f2 === f3` implies `f1 === f3`
 
 By throwing away the universal concept of `Object.equals` we don't
 take equality for granted when we construct an ADT, stopping us at
@@ -3014,28 +3172,29 @@ Continuing the trend of replacing old Java concepts, rather than data
 to:
 
 {lang="text"}
-~~~~~~~~
+
+```
   @typeclass trait Order[F] extends Equal[F] {
     @op("?|?") def order(x: F, y: F): Ordering
-  
+
     override  def equal(x: F, y: F): Boolean = order(x, y) == Ordering.EQ
     @op("<" ) def lt(x: F, y: F): Boolean = ...
     @op("<=") def lte(x: F, y: F): Boolean = ...
     @op(">" ) def gt(x: F, y: F): Boolean = ...
     @op(">=") def gte(x: F, y: F): Boolean = ...
-  
+
     def max(x: F, y: F): F = ...
     def min(x: F, y: F): F = ...
     def sort(x: F, y: F): (F, F) = ...
   }
-  
+
   sealed abstract class Ordering
   object Ordering {
     case object LT extends Ordering
     case object EQ extends Ordering
     case object GT extends Ordering
   }
-~~~~~~~~
+```
 
 `Order` implements `.equal` in terms of the new primitive `.order`. When a
 typeclass implements a parent's *primitive combinator* with a *derived
@@ -3047,31 +3206,33 @@ Things that have an order may also be discrete, allowing us to walk
 successors and predecessors:
 
 {lang="text"}
-~~~~~~~~
+
+```
   @typeclass trait Enum[F] extends Order[F] {
     def succ(a: F): F
     def pred(a: F): F
     def min: Option[F]
     def max: Option[F]
-  
+
     @op("-+-") def succn(n: Int, a: F): F = ...
     @op("---") def predn(n: Int, a: F): F = ...
-  
+
     @op("|->" ) def fromToL(from: F, to: F): List[F] = ...
     @op("|-->") def fromStepToL(from: F, step: Int, to: F): List[F] = ...
     @op("|=>" ) def fromTo(from: F, to: F): EphemeralStream[F] = ...
     @op("|==>") def fromStepTo(from: F, step: Int, to: F): EphemeralStream[F] = ...
   }
-~~~~~~~~
+```
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> 10 |--> (2, 20)
   res: List[Int] = List(10, 12, 14, 16, 18, 20)
-  
+
   scala> 'm' |-> 'u'
   res: List[Char] = List(m, n, o, p, q, r, s, t, u)
-~~~~~~~~
+```
 
 A> `|-->` is Scalaz's Lightsaber. This is the syntax of a Functional
 A> Programmer. Not as clumsy or random as `fromStepToL`. An elegant
@@ -3086,17 +3247,17 @@ not make sense in Java. We would like to enforce stringyness at compiletime and
 this is exactly what `Show` achieves:
 
 {lang="text"}
-~~~~~~~~
+
+```
   trait Show[F] {
     def show(f: F): Cord = ...
     def shows(f: F): String = ...
   }
-~~~~~~~~
+```
 
 We will explore `Cord` in more detail in the chapter on data types, we need only
 know that it is an efficient data structure for storing and manipulating
 `String`.
-
 
 ## Mappable Things
 
@@ -3106,44 +3267,46 @@ some sense:
 {width=100%}
 ![](images/scalaz-mappable.png)
 
-
 ### Functor
 
 {lang="text"}
-~~~~~~~~
+
+```
   @typeclass trait Functor[F[_]] {
     def map[A, B](fa: F[A])(f: A => B): F[B]
-  
+
     def void[A](fa: F[A]): F[Unit] = map(fa)(_ => ())
     def fproduct[A, B](fa: F[A])(f: A => B): F[(A, B)] = map(fa)(a => (a, f(a)))
-  
+
     def fpair[A](fa: F[A]): F[(A, A)] = map(fa)(a => (a, a))
     def strengthL[A, B](a: A, f: F[B]): F[(A, B)] = map(f)(b => (a, b))
     def strengthR[A, B](f: F[A], b: B): F[(A, B)] = map(f)(a => (a, b))
-  
+
     def lift[A, B](f: A => B): F[A] => F[B] = map(_)(f)
     def mapply[A, B](a: A)(f: F[A => B]): F[B] = map(f)((ff: A => B) => ff(a))
   }
-~~~~~~~~
+```
 
 The only abstract method is `map`, and it must *compose*, i.e. mapping
 with `f` and then again with `g` is the same as mapping once with the
 composition of `f` and `g`:
 
 {lang="text"}
-~~~~~~~~
+
+```
   fa.map(f).map(g) == fa.map(f.andThen(g))
-~~~~~~~~
+```
 
 The `map` should also perform a no-op if the provided function is
 `identity` (i.e. `x => x`)
 
 {lang="text"}
-~~~~~~~~
+
+```
   fa.map(identity) == fa
-  
+
   fa.map(x => x) == fa
-~~~~~~~~
+```
 
 `Functor` defines some convenience methods around `map` that can be optimised by
 specific instances. The documentation has been intentionally omitted in the
@@ -3152,37 +3315,38 @@ implementation. Please spend a moment studying only the type signature of the
 following before reading further:
 
 {lang="text"}
-~~~~~~~~
+
+```
   def void[A](fa: F[A]): F[Unit]
   def fproduct[A, B](fa: F[A])(f: A => B): F[(A, B)]
-  
+
   def fpair[A](fa: F[A]): F[(A, A)]
   def strengthL[A, B](a: A, f: F[B]): F[(A, B)]
   def strengthR[A, B](f: F[A], b: B): F[(A, B)]
-  
+
   // harder
   def lift[A, B](f: A => B): F[A] => F[B]
   def mapply[A, B](a: A)(f: F[A => B]): F[B]
-~~~~~~~~
+```
 
-1.  `void` takes an instance of the `F[A]` and always returns an
-    `F[Unit]`, it forgets all the values whilst preserving the
-    structure.
-2.  `fproduct` takes the same input as `map` but returns `F[(A, B)]`,
-    i.e. it tuples the contents with the result of applying the
-    function. This is useful when we wish to retain the input.
-3.  `fpair` twins all the elements of `A` into a tuple `F[(A, A)]`
-4.  `strengthL` pairs the contents of an `F[B]` with a constant `A` on
-    the left.
-5.  `strengthR` pairs the contents of an `F[A]` with a constant `B` on
-    the right.
-6.  `lift` takes a function `A => B` and returns a `F[A] => F[B]`. In
-    other words, it takes a function over the contents of an `F[A]` and
-    returns a function that operates **on** the `F[A]` directly.
-7.  `mapply` is a mind bender. Say we have an `F[_]` of functions `A
-       => B` and a value `A`, then we can get an `F[B]`. It has a similar
-    signature to `pure` but requires the caller to provide the `F[A =>
-       B]`.
+1. `void` takes an instance of the `F[A]` and always returns an
+   `F[Unit]`, it forgets all the values whilst preserving the
+   structure.
+2. `fproduct` takes the same input as `map` but returns `F[(A, B)]`,
+   i.e. it tuples the contents with the result of applying the
+   function. This is useful when we wish to retain the input.
+3. `fpair` twins all the elements of `A` into a tuple `F[(A, A)]`
+4. `strengthL` pairs the contents of an `F[B]` with a constant `A` on
+   the left.
+5. `strengthR` pairs the contents of an `F[A]` with a constant `B` on
+   the right.
+6. `lift` takes a function `A => B` and returns a `F[A] => F[B]`. In
+   other words, it takes a function over the contents of an `F[A]` and
+   returns a function that operates **on** the `F[A]` directly.
+7. `mapply` is a mind bender. Say we have an `F[_]` of functions `A
+      => B` and a value `A`, then we can get an `F[B]`. It has a similar
+   signature to `pure` but requires the caller to provide the `F[A =>
+      B]`.
 
 `fpair`, `strengthL` and `strengthR` look pretty useless, but they are
 useful when we wish to retain some information that would otherwise be
@@ -3191,12 +3355,13 @@ lost to scope.
 `Functor` has some special syntax:
 
 {lang="text"}
-~~~~~~~~
+
+```
   implicit class FunctorOps[F[_]: Functor, A](self: F[A]) {
     def as[B](b: =>B): F[B] = Functor[F].map(self)(_ => b)
     def >|[B](b: =>B): F[B] = as(b)
   }
-~~~~~~~~
+```
 
 `.as` and `>|` are a way of replacing the output with a constant.
 
@@ -3212,51 +3377,55 @@ admit to until now), we defined `start` and `stop` to return their
 input:
 
 {lang="text"}
-~~~~~~~~
+
+```
   def start(node: MachineNode): F[MachineNode]
   def stop (node: MachineNode): F[MachineNode]
-~~~~~~~~
+```
 
 This allowed us to write terse business logic such as
 
 {lang="text"}
-~~~~~~~~
+
+```
   for {
     _      <- m.start(node)
     update = world.copy(pending = Map(node -> world.time))
   } yield update
-~~~~~~~~
+```
 
 and
 
 {lang="text"}
-~~~~~~~~
+
+```
   for {
     stopped <- nodes.traverse(m.stop)
     updates = stopped.map(_ -> world.time).toList.toMap
     update  = world.copy(pending = world.pending ++ updates)
   } yield update
-~~~~~~~~
+```
 
 But this hack pushes unnecessary complexity into the implementations. It is
 better if we let our algebras return `F[Unit]` and use `as`:
 
 {lang="text"}
-~~~~~~~~
+
+```
   m.start(node) as world.copy(pending = Map(node -> world.time))
-~~~~~~~~
+```
 
 and
 
 {lang="text"}
-~~~~~~~~
+
+```
   for {
     stopped <- nodes.traverse(a => m.stop(a) as a)
     updates = stopped.map(_ -> world.time).toList.toMap
     update  = world.copy(pending = world.pending ++ updates)
   } yield update
-~~~~~~~~
-
+```
 
 ### Foldable
 
@@ -3268,12 +3437,13 @@ There are so many methods we are going to have to split them out,
 beginning with the abstract methods:
 
 {lang="text"}
-~~~~~~~~
+
+```
   @typeclass trait Foldable[F[_]] {
     def foldMap[A, B: Monoid](fa: F[A])(f: A => B): B
     def foldRight[A, B](fa: F[A], z: =>B)(f: (A, =>B) => B): B
     def foldLeft[A, B](fa: F[A], z: B)(f: (B, A) => B): B = ...
-~~~~~~~~
+```
 
 An instance of `Foldable` need only implement `foldMap` and
 `foldRight` to get all of the functionality in this typeclass,
@@ -3358,29 +3528,32 @@ with left/right variants to allow choosing based on performance
 criteria:
 
 {lang="text"}
-~~~~~~~~
+
+```
   def fold[A: Monoid](t: F[A]): A = ...
   def sumr[A: Monoid](fa: F[A]): A = ...
   def suml[A: Monoid](fa: F[A]): A = ...
-~~~~~~~~
+```
 
 Recall that when we learnt about `Monoid`, we wrote this:
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> templates.foldLeft(Monoid[TradeTemplate].zero)(_ |+| _)
-~~~~~~~~
+```
 
 We now know this is silly and we should have written:
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> templates.toIList.fold
   res: TradeTemplate = TradeTemplate(
                          List(2017-08-05,2017-09-05),
                          Some(USD),
                          Some(false))
-~~~~~~~~
+```
 
 `.fold` doesn't work on stdlib `List` because it already has a method
 called `fold` that does it is own thing in its own special way.
@@ -3389,30 +3562,33 @@ The strangely named `intercalate` inserts a specific `A` between each
 element before performing the `fold`
 
 {lang="text"}
-~~~~~~~~
+
+```
   def intercalate[A: Monoid](fa: F[A], a: A): A = ...
-~~~~~~~~
+```
 
 which is a generalised version of the stdlib's `mkString`:
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> List("foo", "bar").intercalate(",")
   res: String = "foo,bar"
-~~~~~~~~
+```
 
 The `foldLeft` provides the means to obtain any element by traversal
 index, including a bunch of other related methods:
 
 {lang="text"}
-~~~~~~~~
+
+```
   def index[A](fa: F[A], i: Int): Option[A] = ...
   def indexOr[A](fa: F[A], default: =>A, i: Int): A = ...
   def length[A](fa: F[A]): Int = ...
   def count[A](fa: F[A]): Int = length(fa)
   def empty[A](fa: F[A]): Boolean = ...
   def element[A: Equal](fa: F[A], a: A): Boolean = ...
-~~~~~~~~
+```
 
 Scalaz is a pure library of only *total functions*. Whereas `List(0)` can throw
 an exception, `Foldable.index` returns an `Option[A]` with the convenient
@@ -3424,9 +3600,10 @@ These methods *really* sound like a collections API. And, of course,
 anything with a `Foldable` can be converted into a `List`
 
 {lang="text"}
-~~~~~~~~
+
+```
   def toList[A](fa: F[A]): List[A] = ...
-~~~~~~~~
+```
 
 There are also conversions to other stdlib and Scalaz data types such
 as `.toSet`, `.toVector`, `.toStream`, `.to[T <: TraversableLike]`,
@@ -3435,11 +3612,12 @@ as `.toSet`, `.toVector`, `.toStream`, `.to[T <: TraversableLike]`,
 There are useful predicate checks
 
 {lang="text"}
-~~~~~~~~
+
+```
   def filterLength[A](fa: F[A])(f: A => Boolean): Int = ...
   def all[A](fa: F[A])(p: A => Boolean): Boolean = ...
   def any[A](fa: F[A])(p: A => Boolean): Boolean = ...
-~~~~~~~~
+```
 
 `filterLength` is a way of counting how many elements are `true` for a
 predicate, `all` and `any` return `true` if all (or any) element meets
@@ -3456,23 +3634,25 @@ We can split an `F[A]` into parts that result in the same `B` with
 `splitBy`
 
 {lang="text"}
-~~~~~~~~
+
+```
   def splitBy[A, B: Equal](fa: F[A])(f: A => B): IList[(B, Nel[A])] = ...
   def splitByRelation[A](fa: F[A])(r: (A, A) => Boolean): IList[Nel[A]] = ...
   def splitWith[A](fa: F[A])(p: A => Boolean): List[Nel[A]] = ...
   def selectSplit[A](fa: F[A])(p: A => Boolean): List[Nel[A]] = ...
-  
+
   def findLeft[A](fa: F[A])(f: A => Boolean): Option[A] = ...
   def findRight[A](fa: F[A])(f: A => Boolean): Option[A] = ...
-~~~~~~~~
+```
 
 for example
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> IList("foo", "bar", "bar", "faz", "gaz", "baz").splitBy(_.charAt(0))
   res = [(f, [foo]), (b, [bar, bar]), (f, [faz]), (g, [gaz]), (b, [baz])]
-~~~~~~~~
+```
 
 noting that there are two values indexed by `'b'`.
 
@@ -3492,11 +3672,12 @@ Making further use of `Equal` and `Order`, we have the `distinct`
 methods which return groupings.
 
 {lang="text"}
-~~~~~~~~
+
+```
   def distinct[A: Order](fa: F[A]): IList[A] = ...
   def distinctE[A: Equal](fa: F[A]): IList[A] = ...
   def distinctBy[A, B: Equal](fa: F[A])(f: A => B): IList[A] =
-~~~~~~~~
+```
 
 `distinct` is implemented more efficiently than `distinctE` because it
 can make use of ordering and therefore use a quicksort-esque algorithm
@@ -3513,31 +3694,33 @@ or `By` pattern to first map to another type or to use a different
 type to do the order comparison.
 
 {lang="text"}
-~~~~~~~~
+
+```
   def maximum[A: Order](fa: F[A]): Option[A] = ...
   def maximumOf[A, B: Order](fa: F[A])(f: A => B): Option[B] = ...
   def maximumBy[A, B: Order](fa: F[A])(f: A => B): Option[A] = ...
-  
+
   def minimum[A: Order](fa: F[A]): Option[A] = ...
   def minimumOf[A, B: Order](fa: F[A])(f: A => B): Option[B] = ...
   def minimumBy[A, B: Order](fa: F[A])(f: A => B): Option[A] = ...
-  
+
   def extrema[A: Order](fa: F[A]): Option[(A, A)] = ...
   def extremaOf[A, B: Order](fa: F[A])(f: A => B): Option[(B, B)] = ...
   def extremaBy[A, B: Order](fa: F[A])(f: A => B): Option[(A, A)] =
-~~~~~~~~
+```
 
 For example we can ask which `String` is maximum `By` length, or what
 is the maximum length `Of` the elements.
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> List("foo", "fazz").maximumBy(_.length)
   res: Option[String] = Some(fazz)
-  
+
   scala> List("foo", "fazz").maximumOf(_.length)
   res: Option[Int] = Some(4)
-~~~~~~~~
+```
 
 This concludes the key features of `Foldable`. The takeaway is that anything
 we'd expect to find in a collection library is probably on `Foldable` and if it
@@ -3547,13 +3730,14 @@ We will conclude with some variations of the methods we've already seen.
 First there are methods that take a `Semigroup` instead of a `Monoid`:
 
 {lang="text"}
-~~~~~~~~
+
+```
   def fold1Opt[A: Semigroup](fa: F[A]): Option[A] = ...
   def foldMap1Opt[A, B: Semigroup](fa: F[A])(f: A => B): Option[B] = ...
   def sumr1Opt[A: Semigroup](fa: F[A]): Option[A] = ...
   def suml1Opt[A: Semigroup](fa: F[A]): Option[A] = ...
   ...
-~~~~~~~~
+```
 
 returning `Option` to account for empty data structures (recall that
 `Semigroup` does not have a `zero`).
@@ -3570,7 +3754,8 @@ Importantly, there are variants that take monadic return values. We already used
 know that it is from `Foldable`:
 
 {lang="text"}
-~~~~~~~~
+
+```
   def foldLeftM[G[_]: Monad, A, B](fa: F[A], z: B)(f: (B, A) => G[B]): G[B] = ...
   def foldRightM[G[_]: Monad, A, B](fa: F[A], z: =>B)(f: (A, =>B) => G[B]): G[B] = ...
   def foldMapM[G[_]: Monad, A, B: Monoid](fa: F[A])(f: A => G[B]): G[B] = ...
@@ -3578,31 +3763,31 @@ know that it is from `Foldable`:
   def allM[G[_]: Monad, A](fa: F[A])(p: A => G[Boolean]): G[Boolean] = ...
   def anyM[G[_]: Monad, A](fa: F[A])(p: A => G[Boolean]): G[Boolean] = ...
   ...
-~~~~~~~~
-
+```
 
 ### Traverse
 
 `Traverse` is what happens when we cross a `Functor` with a `Foldable`
 
 {lang="text"}
-~~~~~~~~
+
+```
   trait Traverse[F[_]] extends Functor[F] with Foldable[F] {
     def traverse[G[_]: Applicative, A, B](fa: F[A])(f: A => G[B]): G[F[B]]
     def sequence[G[_]: Applicative, A](fga: F[G[A]]): G[F[A]] = ...
-  
+
     def reverse[A](fa: F[A]): F[A] = ...
-  
+
     def zipL[A, B](fa: F[A], fb: F[B]): F[(A, Option[B])] = ...
     def zipR[A, B](fa: F[A], fb: F[B]): F[(Option[A], B)] = ...
     def indexed[A](fa: F[A]): F[(Int, A)] = ...
     def zipWithL[A, B, C](fa: F[A], fb: F[B])(f: (A, Option[B]) => C): F[C] = ...
     def zipWithR[A, B, C](fa: F[A], fb: F[B])(f: (Option[A], B) => C): F[C] = ...
-  
+
     def mapAccumL[S, A, B](fa: F[A], z: S)(f: (S, A) => (S, B)): (S, F[B]) = ...
     def mapAccumR[S, A, B](fa: F[A], z: S)(f: (S, A) => (S, B)): (S, F[B]) = ...
   }
-~~~~~~~~
+```
 
 At the beginning of the chapter we showed the importance of `traverse`
 and `sequence` for swapping around type constructors to fit a
@@ -3630,16 +3815,17 @@ to process the list of words a second time so it can be scaled to an
 infinite stream:
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> val freedom =
   """We campaign for these freedoms because everyone deserves them.
      With these freedoms, the users (both individually and collectively)
      control the program and what it does for them."""
      .split("\\s+")
      .toList
-  
+
   scala> def clean(s: String): String = s.toLowerCase.replaceAll("[,.()]+", "")
-  
+
   scala> freedom
          .mapAccumL(Set.empty[String]) { (seen, word) =>
            val cleaned = clean(word)
@@ -3647,19 +3833,18 @@ infinite stream:
          }
          ._2
          .intercalate(" ")
-  
+
   res: String =
   """We campaign for these freedoms because everyone deserves them.
      With _ _ the users (both individually and collectively)
      control _ program _ what it does _ _"""
-~~~~~~~~
+```
 
 Finally `Traverse1`, like `Foldable1`, provides variants of these methods for
 data structures that cannot be empty, accepting the weaker `Semigroup` instead
 of a `Monoid`, and an `Apply` instead of an `Applicative`. Recall that
 `Semigroup` does not have to provide an `.empty`, and `Apply` does not have to
 provide a `.point`.
-
 
 ### Align
 
@@ -3668,27 +3853,29 @@ looking at `Align`, meet the `\&/` data type (spoken as *These*, or
 *hurray!*).
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed abstract class \&/[+A, +B]
   final case class This[A](aa: A) extends (A \&/ Nothing)
   final case class That[B](bb: B) extends (Nothing \&/ B)
   final case class Both[A, B](aa: A, bb: B) extends (A \&/ B)
-~~~~~~~~
+```
 
 i.e. it is a data encoding of inclusive logical `OR`. `A` or `B` or both `A` and
 `B`.
 
 {lang="text"}
-~~~~~~~~
+
+```
   @typeclass trait Align[F[_]] extends Functor[F] {
     def alignWith[A, B, C](f: A \&/ B => C): (F[A], F[B]) => F[C]
     def align[A, B](a: F[A], b: F[B]): F[A \&/ B] = ...
-  
+
     def merge[A: Semigroup](a1: F[A], a2: F[A]): F[A] = ...
-  
+
     def pad[A, B]: (F[A], F[B]) => F[(Option[A], Option[B])] = ...
     def padWith[A, B, C](f: (Option[A], Option[B]) => C): (F[A], F[B]) => F[C] = ...
-~~~~~~~~
+```
 
 `alignWith` takes a function from either an `A` or a `B` (or both) to
 a `C` and returns a lifted function from a tuple of `F[A]` and `F[B]`
@@ -3700,37 +3887,41 @@ two entries results in combining their values, having the consequence that
 `Map[K, List[A]]` behaves like a multimap:
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> Map("foo" -> List(1)) merge Map("foo" -> List(1), "bar" -> List(2))
   res = Map(foo -> List(1, 1), bar -> List(2))
-~~~~~~~~
+```
 
 and a `Map[K, Int]` simply tally their contents when merging:
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> Map("foo" -> 1) merge Map("foo" -> 1, "bar" -> 2)
   res = Map(foo -> 2, bar -> 2)
-~~~~~~~~
+```
 
 `.pad` and `.padWith` are for partially merging two data structures that might
 be missing values on one side. For example if we wanted to aggregate independent
 votes and retain the knowledge of where the votes came from
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> Map("foo" -> 1) pad Map("foo" -> 1, "bar" -> 2)
   res = Map(foo -> (Some(1),Some(1)), bar -> (None,Some(2)))
-  
+
   scala> Map("foo" -> 1, "bar" -> 2) pad Map("foo" -> 1)
   res = Map(foo -> (Some(1),Some(1)), bar -> (Some(2),None))
-~~~~~~~~
+```
 
 There are convenient variants of `align` that make use of the
 structure of `\&/`
 
 {lang="text"}
-~~~~~~~~
+
+```
   ...
     def alignSwap[A, B](a: F[A], b: F[B]): F[B \&/ A] = ...
     def alignA[A, B](a: F[A], b: F[B]): F[Option[A]] = ...
@@ -3739,35 +3930,35 @@ structure of `\&/`
     def alignThat[A, B](a: F[A], b: F[B]): F[Option[B]] = ...
     def alignBoth[A, B](a: F[A], b: F[B]): F[Option[(A, B)]] = ...
   }
-~~~~~~~~
+```
 
 which should make sense from their type signatures. Examples:
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> List(1,2,3) alignSwap List(4,5)
   res = List(Both(4,1), Both(5,2), That(3))
-  
+
   scala> List(1,2,3) alignA List(4,5)
   res = List(Some(1), Some(2), Some(3))
-  
+
   scala> List(1,2,3) alignB List(4,5)
   res = List(Some(4), Some(5), None)
-  
+
   scala> List(1,2,3) alignThis List(4,5)
   res = List(None, None, Some(3))
-  
+
   scala> List(1,2,3) alignThat List(4,5)
   res = List(None, None, None)
-  
+
   scala> List(1,2,3) alignBoth List(4,5)
   res = List(Some((1,4)), Some((2,5)), None)
-~~~~~~~~
+```
 
 Note that the `A` and `B` variants use inclusive `OR`, whereas the
 `This` and `That` variants are exclusive, returning `None` if there is
 a value in both sides, or no value on either side.
-
 
 ## Variance
 
@@ -3790,24 +3981,25 @@ since `Functor` is so popular it gets the nickname. Likewise
 `contramap` and ignores the function from `A` to `B`:
 
 {lang="text"}
-~~~~~~~~
+
+```
   @typeclass trait InvariantFunctor[F[_]] {
     def xmap[A, B](fa: F[A], f: A => B, g: B => A): F[B]
     ...
   }
-  
+
   @typeclass trait Functor[F[_]] extends InvariantFunctor[F] {
     def map[A, B](fa: F[A])(f: A => B): F[B]
     def xmap[A, B](fa: F[A], f: A => B, g: B => A): F[B] = map(fa)(f)
     ...
   }
-  
+
   @typeclass trait Contravariant[F[_]] extends InvariantFunctor[F] {
     def contramap[A, B](fa: F[A])(f: B => A): F[B]
     def xmap[A, B](fa: F[A], f: A => B, g: B => A): F[B] = contramap(fa)(g)
     ...
   }
-~~~~~~~~
+```
 
 It is important to note that, although related at a theoretical level,
 the words *covariant*, *contravariant* and *invariant* do not directly
@@ -3828,9 +4020,10 @@ types `Alpha`, `Beta`, `Gamma`, etc, to ensure that we don't mix up numbers in a
 financial calculation:
 
 {lang="text"}
-~~~~~~~~
+
+```
   final case class Alpha(value: Double)
-~~~~~~~~
+```
 
 but now we're faced with the problem that we don't have any typeclasses for
 these new types. If we use the values in JSON documents, we have to write
@@ -3839,25 +4032,25 @@ instances of `JsEncoder` and `JsDecoder`.
 However, `JsEncoder` has a `Contravariant` and `JsDecoder` has a `Functor`, so
 we can derive instances. Filling in the contract:
 
--   "if you give me a `JsDecoder` for a `Double`, and a way to go from a `Double`
-    to an `Alpha`, then I can give you a `JsDecoder` for an `Alpha`".
--   "if you give me a `JsEncoder` for a `Double`, and a way to go from an `Alpha`
-    to a `Double`, then I can give you a `JsEncoder` for an `Alpha`".
+- "if you give me a `JsDecoder` for a `Double`, and a way to go from a `Double`
+  to an `Alpha`, then I can give you a `JsDecoder` for an `Alpha`".
+- "if you give me a `JsEncoder` for a `Double`, and a way to go from an `Alpha`
+  to a `Double`, then I can give you a `JsEncoder` for an `Alpha`".
 
 {lang="text"}
-~~~~~~~~
+
+```
   object Alpha {
     implicit val decoder: JsDecoder[Alpha] = JsDecoder[Double].map(Alpha(_))
     implicit val encoder: JsEncoder[Alpha] = JsEncoder[Double].contramap(_.value)
   }
-~~~~~~~~
+```
 
 Methods on a typeclass can have their type parameters in *contravariant
 position* (method parameters) or in *covariant position* (return type). If a
 typeclass has a combination of covariant and contravariant positions, it might
 have an *invariant functor*. For example, `Semigroup` and `Monoid` have an
 `InvariantFunctor`, but not a `Functor` or a `Contravariant`.
-
 
 ## Apply and Bind
 
@@ -3866,7 +4059,6 @@ Consider this the warm-up act to `Applicative` and `Monad`
 {width=100%}
 ![](images/scalaz-apply.png)
 
-
 ### Apply
 
 `Apply` extends `Functor` by adding a method named `ap` which is
@@ -3874,11 +4066,12 @@ similar to `map` in that it applies a function to values. However,
 with `ap`, the function is in the same context as the values.
 
 {lang="text"}
-~~~~~~~~
+
+```
   @typeclass trait Apply[F[_]] extends Functor[F] {
     @op("<*>") def ap[A, B](fa: =>F[A])(f: =>F[A => B]): F[B]
     ...
-~~~~~~~~
+```
 
 A> `<*>` is the Advanced TIE Fighter, as flown by Darth Vader. Appropriate since it
 A> looks like an angry parent. Or a sad Pikachu.
@@ -3887,7 +4080,8 @@ It is worth taking a moment to consider what that means for a simple data
 structure like `Option[A]`, having the following implementation of `.ap`
 
 {lang="text"}
-~~~~~~~~
+
+```
   implicit def option[A]: Apply[Option[A]] = new Apply[Option[A]] {
     override def ap[A, B](fa: =>Option[A])(f: =>Option[A => B]) = f match {
       case Some(ff) => fa.map(ff)
@@ -3895,7 +4089,7 @@ structure like `Option[A]`, having the following implementation of `.ap`
     }
     ...
   }
-~~~~~~~~
+```
 
 To implement `.ap`, we must first extract the function `ff: A => B` from `f:
 Option[A => B]`, then we can map over `fa`. The extraction of the function from
@@ -3906,51 +4100,54 @@ Returning to `Apply`, we find `.applyX` boilerplate that allows us to combine
 parallel functions and then map over their combined output:
 
 {lang="text"}
-~~~~~~~~
+
+```
   @typeclass trait Apply[F[_]] extends Functor[F] {
     ...
     def apply2[A,B,C](fa: =>F[A], fb: =>F[B])(f: (A, B) => C): F[C] = ...
     def apply3[A,B,C,D](fa: =>F[A],fb: =>F[B],fc: =>F[C])(f: (A,B,C) =>D): F[D] = ...
     ...
     def apply12[...]
-~~~~~~~~
+```
 
 Read `.apply2` as a contract promising: "if you give me an `F` of `A` and an `F`
 of `B`, with a way of combining `A` and `B` into a `C`, then I can give you an
 `F` of `C`". There are many uses for this contract and the two most important are:
 
--   constructing some typeclasses for a product type `C` from its constituents `A`
-    and `B`
--   performing *effects* in parallel, like the drone and google algebras we
-    created in Chapter 3, and then combining their results.
+- constructing some typeclasses for a product type `C` from its constituents `A`
+  and `B`
+- performing *effects* in parallel, like the drone and google algebras we
+  created in Chapter 3, and then combining their results.
 
 Indeed, `Apply` is so useful that it has special syntax:
 
 {lang="text"}
-~~~~~~~~
+
+```
   implicit class ApplyOps[F[_]: Apply, A](self: F[A]) {
     def *>[B](fb: F[B]): F[B] = Apply[F].apply2(self,fb)((_,b) => b)
     def <*[B](fb: F[B]): F[A] = Apply[F].apply2(self,fb)((a,_) => a)
     def |@|[B](fb: F[B]): ApplicativeBuilder[F, A, B] = ...
   }
-  
+
   class ApplicativeBuilder[F[_]: Apply, A, B](a: F[A], b: F[B]) {
     def tupled: F[(A, B)] = Apply[F].apply2(a, b)(Tuple2(_))
     def |@|[C](cc: F[C]): ApplicativeBuilder3[C] = ...
-  
+
     sealed abstract class ApplicativeBuilder3[C](c: F[C]) {
       ..ApplicativeBuilder4
         ...
           ..ApplicativeBuilder12
   }
-~~~~~~~~
+```
 
 which is exactly what we used in Chapter 3:
 
 {lang="text"}
-~~~~~~~~
+
+```
   (d.getBacklog |@| d.getAgents |@| m.getManaged |@| m.getAlive |@| m.getTime)
-~~~~~~~~
+```
 
 A> The `|@|` operator has many names. Some call it the *Cartesian Product Syntax*,
 A> others call it the *Cinnamon Bun*, the *Admiral Ackbar* or the *Macaulay
@@ -3969,100 +4166,110 @@ the alternative *lifting with arity* syntax, which does not produce
 any intermediate objects:
 
 {lang="text"}
-~~~~~~~~
+
+```
   def ^[F[_]: Apply,A,B,C](fa: =>F[A],fb: =>F[B])(f: (A,B) =>C): F[C] = ...
   def ^^[F[_]: Apply,A,B,C,D](fa: =>F[A],fb: =>F[B],fc: =>F[C])(f: (A,B,C) =>D): F[D] = ...
   ...
   def ^^^^^^[F[_]: Apply, ...]
-~~~~~~~~
+```
 
 used like
 
 {lang="text"}
-~~~~~~~~
+
+```
   ^^^^(d.getBacklog, d.getAgents, m.getManaged, m.getAlive, m.getTime)
-~~~~~~~~
+```
 
 or directly call `applyX`
 
 {lang="text"}
-~~~~~~~~
+
+```
   Apply[F].apply5(d.getBacklog, d.getAgents, m.getManaged, m.getAlive, m.getTime)
-~~~~~~~~
+```
 
 Despite being more commonly used with effects, `Apply` works just as well with
 data structures. Consider rewriting
 
 {lang="text"}
-~~~~~~~~
+
+```
   for {
     foo <- data.foo: Option[String]
     bar <- data.bar: Option[Int]
   } yield foo + bar.shows
-~~~~~~~~
+```
 
 as
 
 {lang="text"}
-~~~~~~~~
+
+```
   (data.foo |@| data.bar)(_ + _.shows)
-~~~~~~~~
+```
 
 If we only want the combined output as a tuple, methods exist to do
 just that:
 
 {lang="text"}
-~~~~~~~~
+
+```
   @op("tuple") def tuple2[A,B](fa: =>F[A],fb: =>F[B]): F[(A,B)] = ...
   def tuple3[A,B,C](fa: =>F[A],fb: =>F[B],fc: =>F[C]): F[(A,B,C)] = ...
   ...
   def tuple12[...]
-~~~~~~~~
+```
 
 {lang="text"}
-~~~~~~~~
+
+```
   (data.foo tuple data.bar) : Option[(String, Int)]
-~~~~~~~~
+```
 
 There are also the generalised versions of `ap` for more than two
 parameters:
 
 {lang="text"}
-~~~~~~~~
+
+```
   def ap2[A,B,C](fa: =>F[A],fb: =>F[B])(f: F[(A,B) => C]): F[C] = ...
   def ap3[A,B,C,D](fa: =>F[A],fb: =>F[B],fc: =>F[C])(f: F[(A,B,C) => D]): F[D] = ...
   ...
   def ap12[...]
-~~~~~~~~
+```
 
 along with `.lift` methods that take normal functions and lift them into the
 `F[_]` context, the generalisation of `Functor.lift`
 
 {lang="text"}
-~~~~~~~~
+
+```
   def lift2[A,B,C](f: (A,B) => C): (F[A],F[B]) => F[C] = ...
   def lift3[A,B,C,D](f: (A,B,C) => D): (F[A],F[B],F[C]) => F[D] = ...
   ...
   def lift12[...]
-~~~~~~~~
+```
 
 and `.apF`, a partially applied syntax for `ap`
 
 {lang="text"}
-~~~~~~~~
+
+```
   def apF[A,B](f: =>F[A => B]): F[A] => F[B] = ...
-~~~~~~~~
+```
 
 Finally `.forever`
 
 {lang="text"}
-~~~~~~~~
+
+```
   def forever[A, B](fa: F[A]): F[B] = ...
-~~~~~~~~
+```
 
 repeating an effect without stopping. The instance of `Apply` must be
 stack safe or we will get `StackOverflowError`.
-
 
 ### Bind
 
@@ -4071,24 +4278,25 @@ over the result of an effect to return a new effect, or for functions over the
 values of a data structure to return new data structures that are then joined.
 
 {lang="text"}
-~~~~~~~~
+
+```
   @typeclass trait Bind[F[_]] extends Apply[F] {
-  
+
     @op(">>=") def bind[A, B](fa: F[A])(f: A => F[B]): F[B]
     def flatMap[A, B](fa: F[A])(f: A => F[B]): F[B] = bind(fa)(f)
-  
+
     override def ap[A, B](fa: =>F[A])(f: =>F[A => B]): F[B] =
       bind(f)(x => map(fa)(x))
     override def apply2[A, B, C](fa: =>F[A], fb: =>F[B])(f: (A, B) => C): F[C] =
       bind(fa)(a => map(fb)(b => f(a, b)))
-  
+
     def join[A](ffa: F[F[A]]): F[A] = bind(ffa)(identity)
-  
+
     def mproduct[A, B](fa: F[A])(f: A => F[B]): F[(A, B)] = ...
     def ifM[B](value: F[Boolean], t: =>F[B], f: =>F[B]): F[B] = ...
-  
+
   }
-~~~~~~~~
+```
 
 The `.join` may be familiar to users of `.flatten` in the stdlib, it takes a
 nested context and squashes it into one.
@@ -4103,18 +4311,20 @@ with its output, inside the `F`.
 `ifM` is a way to construct a conditional data structure or effect:
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> List(true, false, true).ifM(List(0), List(1, 1))
   res: List[Int] = List(0, 1, 1, 0)
-~~~~~~~~
+```
 
 `ifM` and `ap` are optimised to cache and reuse code branches, compare
 to the longer form
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> List(true, false, true).flatMap { b => if (b) List(0) else List(1, 1) }
-~~~~~~~~
+```
 
 which produces a fresh `List(0)` or `List(1, 1)` every time the branch
 is invoked.
@@ -4138,16 +4348,16 @@ A> detail in the next chapter.
 `Bind` also has some special syntax
 
 {lang="text"}
-~~~~~~~~
+
+```
   implicit class BindOps[F[_]: Bind, A] (self: F[A]) {
     def >>[B](b: =>F[B]): F[B] = Bind[F].bind(self)(_ => b)
     def >>![B](f: A => F[B]): F[A] = Bind[F].bind(self)(a => f(a).map(_ => a))
   }
-~~~~~~~~
+```
 
 `>>` is when we wish to discard the input to `bind` and `>>!` is when
 we want to run an effect but discard its output.
-
 
 ## Applicative and Monad
 
@@ -4158,14 +4368,15 @@ From a functionality point of view, `Applicative` is `Apply` with a
 ![](images/scalaz-applicative.png)
 
 {lang="text"}
-~~~~~~~~
+
+```
   @typeclass trait Applicative[F[_]] extends Apply[F] {
     def point[A](a: =>A): F[A]
     def pure[A](a: =>A): F[A] = point(a)
   }
-  
+
   @typeclass trait Monad[F[_]] extends Applicative[F] with Bind[F]
-~~~~~~~~
+```
 
 In many ways, `Applicative` and `Monad` are the culmination of everything we've
 seen in this chapter. `.pure` (or `.point` as it is more commonly known for data
@@ -4174,21 +4385,21 @@ structures) allows us to create effects or data structures from values.
 Instances of `Applicative` must meet some laws, effectively asserting
 that all the methods are consistent:
 
--   **Identity**: `fa <*> pure(identity) === fa`, (where `fa` is an `F[A]`) i.e.
-    applying `pure(identity)` does nothing.
--   **Homomorphism**: `pure(a) <*> pure(ab) === pure(ab(a))` (where `ab` is an `A =>
-      B`), i.e. applying a `pure` function to a `pure` value is the same as applying
-    the function to the value and then using `pure` on the result.
--   **Interchange**: `pure(a) <*> fab === fab <*> pure(f => f(a))`, (where `fab` is
-    an `F[A => B]`), i.e. `pure` is a left and right identity
--   **Mappy**: `map(fa)(f) === fa <*> pure(f)`
+- **Identity**: `fa <*> pure(identity) === fa`, (where `fa` is an `F[A]`) i.e.
+  applying `pure(identity)` does nothing.
+- **Homomorphism**: `pure(a) <*> pure(ab) === pure(ab(a))` (where `ab` is an `A =>
+    B`), i.e. applying a `pure` function to a `pure` value is the same as applying
+  the function to the value and then using `pure` on the result.
+- **Interchange**: `pure(a) <*> fab === fab <*> pure(f => f(a))`, (where `fab` is
+  an `F[A => B]`), i.e. `pure` is a left and right identity
+- **Mappy**: `map(fa)(f) === fa <*> pure(f)`
 
 `Monad` adds additional laws:
 
--   **Left Identity**: `pure(a).bind(f) === f(a)`
--   **Right Identity**: `a.bind(pure(_)) === a`
--   **Associativity**: `fa.bind(f).bind(g) === fa.bind(a => f(a).bind(g))` where
-    `fa` is an `F[A]`, `f` is an `A => F[B]` and `g` is a `B => F[C]`.
+- **Left Identity**: `pure(a).bind(f) === f(a)`
+- **Right Identity**: `a.bind(pure(_)) === a`
+- **Associativity**: `fa.bind(f).bind(g) === fa.bind(a => f(a).bind(g))` where
+  `fa` is an `F[A]`, `f` is an `A => F[B]` and `g` is a `B => F[C]`.
 
 Associativity says that chained `bind` calls must agree with nested
 `bind`. However, it does not mean that we can rearrange the order,
@@ -4196,22 +4407,24 @@ which would be *commutativity*. For example, recalling that `flatMap`
 is an alias to `bind`, we cannot rearrange
 
 {lang="text"}
-~~~~~~~~
+
+```
   for {
     _ <- machine.start(node1)
     _ <- machine.stop(node1)
   } yield true
-~~~~~~~~
+```
 
 as
 
 {lang="text"}
-~~~~~~~~
+
+```
   for {
     _ <- machine.stop(node1)
     _ <- machine.start(node1)
   } yield true
-~~~~~~~~
+```
 
 `start` and `stop` are **non**-*commutative*, because the intended
 effect of starting then stopping a node is different to stopping then
@@ -4221,22 +4434,24 @@ But `start` is commutative with itself, and `stop` is commutative with
 itself, so we can rewrite
 
 {lang="text"}
-~~~~~~~~
+
+```
   for {
     _ <- machine.start(node1)
     _ <- machine.start(node2)
   } yield true
-~~~~~~~~
+```
 
 as
 
 {lang="text"}
-~~~~~~~~
+
+```
   for {
     _ <- machine.start(node2)
     _ <- machine.start(node1)
   } yield true
-~~~~~~~~
+```
 
 which are equivalent for our algebra, but not in general. We're making a lot of
 assumptions about the Google Container API here, but this is a reasonable choice
@@ -4247,9 +4462,10 @@ A practical consequence is that a `Monad` must be *commutative* if its
 Chapter 3 when we ran these effects in parallel
 
 {lang="text"}
-~~~~~~~~
+
+```
   (d.getBacklog |@| d.getAgents |@| m.getManaged |@| m.getAlive |@| m.getTime)
-~~~~~~~~
+```
 
 because we know that they are commutative among themselves. When it comes to
 interpreting our application, later in the book, we will have to provide
@@ -4259,7 +4475,6 @@ implementation may choose to sequence the operations to be on the safe side.
 The subtleties of how we deal with (re)-ordering of effects, and what
 those effects are, deserves a dedicated chapter on Advanced Monads.
 
-
 ## Divide and Conquer
 
 {width=100%}
@@ -4268,15 +4483,16 @@ those effects are, deserves a dedicated chapter on Advanced Monads.
 `Divide` is the `Contravariant` analogue of `Apply`
 
 {lang="text"}
-~~~~~~~~
+
+```
   @typeclass trait Divide[F[_]] extends Contravariant[F] {
     def divide[A, B, C](fa: F[A], fb: F[B])(f: C => (A, B)): F[C] = divide2(fa, fb)(f)
-  
+
     def divide1[A1, Z](a1: F[A1])(f: Z => A1): F[Z] = ...
     def divide2[A, B, C](fa: F[A], fb: F[B])(f: C => (A, B)): F[C] = ...
     ...
     def divide22[...] = ...
-~~~~~~~~
+```
 
 `divide` says that if we can break a `C` into an `A` and a `B`, and
 we're given an `F[A]` and an `F[B]`, then we can get an `F[C]`. Hence,
@@ -4288,7 +4504,8 @@ instance of `Divide[Equal]`, let's construct an `Equal` for a new
 product type `Foo`
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> case class Foo(s: String, i: Int)
   scala> implicit val fooEqual: Equal[Foo] =
            Divide[Equal].divide2(Equal[String], Equal[Int]) {
@@ -4296,19 +4513,20 @@ product type `Foo`
            }
   scala> Foo("foo", 1) === Foo("bar", 1)
   res: Boolean = false
-~~~~~~~~
+```
 
 Mirroring `Apply`, `Divide` also has terse syntax for tuples. A softer
 *divide so that we may reign* approach to world domination:
 
 {lang="text"}
-~~~~~~~~
+
+```
   ...
     def tuple2[A1, A2](a1: F[A1], a2: F[A2]): F[(A1, A2)] = ...
     ...
     def tuple22[...] = ...
   }
-~~~~~~~~
+```
 
 Generally, if encoder typeclasses can provide an instance of `Divide`,
 rather than stopping at `Contravariant`, it makes it possible to
@@ -4320,17 +4538,17 @@ chapter on Typeclass Derivation.
 `.conquer`, the equivalent of `.pure`
 
 {lang="text"}
-~~~~~~~~
+
+```
   @typeclass trait Divisible[F[_]] extends Divide[F] {
     def conquer[A]: F[A]
   }
-~~~~~~~~
+```
 
 `.conquer` allows creating trivial implementations where the type parameter is
 ignored. Such values are called *universally quantified*. For example, the
 `Divisible[Equal].conquer[INil[String]]` returns an implementation of `Equal`
 for an empty list of `String` which is always `true`.
-
 
 ## Plus
 
@@ -4342,7 +4560,8 @@ the equivalent of `Monoid` (they even have the same laws) whereas
 `IsEmpty` is novel and allows us to query if an `F[A]` is empty:
 
 {lang="text"}
-~~~~~~~~
+
+```
   @typeclass trait Plus[F[_]] {
     @op("<+>") def plus[A](a: F[A], b: =>F[A]): F[A]
   }
@@ -4352,7 +4571,7 @@ the equivalent of `Monoid` (they even have the same laws) whereas
   @typeclass trait IsEmpty[F[_]] extends PlusEmpty[F] {
     def isEmpty[A](fa: F[A]): Boolean
   }
-~~~~~~~~
+```
 
 A> `<+>` is the TIE Interceptor, and now we're almost out of TIE
 A> Fighters...
@@ -4360,13 +4579,14 @@ A> Fighters...
 Although it may look on the surface as if `<+>` behaves like `|+|`
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> List(2,3) |+| List(7)
   res = List(2, 3, 7)
-  
+
   scala> List(2,3) <+> List(7)
   res = List(2, 3, 7)
-~~~~~~~~
+```
 
 it is best to think of it as operating only at the `F[_]` level, never looking
 into the contents. `Plus` has the convention that it should ignore failures and
@@ -4374,27 +4594,29 @@ into the contents. `Plus` has the convention that it should ignore failures and
 exit (losing information) and failure-handling via fallbacks:
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> Option(1) |+| Option(2)
   res = Some(3)
-  
+
   scala> Option(1) <+> Option(2)
   res = Some(1)
-  
+
   scala> Option.empty[Int] <+> Option(1)
   res = Some(1)
-~~~~~~~~
+```
 
 For example, if we have a `NonEmptyList[Option[Int]]` and we want to ignore
 `None` values (failures) and pick the first winner (`Some`), we can call `<+>`
 from `Foldable1.foldRight1`:
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> NonEmptyList(None, None, Some(1), Some(2), None)
          .foldRight1(_ <+> _)
   res: Option[Int] = Some(1)
-~~~~~~~~
+```
 
 In fact, now that we know about `Plus`, we realise that we didn't need to break
 typeclass coherence (when we defined a locally scoped `Monoid[Option[A]]`) in
@@ -4403,27 +4625,29 @@ which is the same as "pick the winner" if the arguments are swapped. Note the
 use of the TIE Interceptor for `ccy` and `otc` with arguments swapped.
 
 {lang="text"}
-~~~~~~~~
+
+```
   implicit val monoid: Monoid[TradeTemplate] = Monoid.instance(
     (a, b) => TradeTemplate(a.payments |+| b.payments,
                             b.ccy <+> a.ccy,
                             b.otc <+> a.otc),
     TradeTemplate(Nil, None, None)
   )
-~~~~~~~~
+```
 
 `Applicative` and `Monad` have specialised versions of `PlusEmpty`
 
 {lang="text"}
-~~~~~~~~
+
+```
   @typeclass trait ApplicativePlus[F[_]] extends Applicative[F] with PlusEmpty[F]
-  
+
   @typeclass trait MonadPlus[F[_]] extends Monad[F] with ApplicativePlus[F] {
     def unite[T[_]: Foldable, A](ts: F[T[A]]): F[A] = ...
-  
+
     def withFilter[A](fa: F[A])(f: A => Boolean): F[A] = ...
   }
-~~~~~~~~
+```
 
 `.unite` lets us fold a data structure using the outer container's
 `PlusEmpty[F].monoid` rather than the inner content's `Monoid`. For
@@ -4431,18 +4655,19 @@ use of the TIE Interceptor for `ccy` and `otc` with arguments swapped.
 `.empty`, then everything is concatenated. A convenient way to discard errors:
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> List(Right(1), Left("boo"), Right(2)).unite
   res: List[Int] = List(1, 2)
-  
+
   scala> val boo: Either[String, Int] = Left("boo")
          boo.foldMap(a => a.pure[List])
   res: List[String] = List()
-  
+
   scala> val n: Either[String, Int] = Right(1)
          n.foldMap(a => a.pure[List])
   res: List[Int] = List(1)
-~~~~~~~~
+```
 
 `withFilter` allows us to make use of `for` comprehension language
 support as discussed in Chapter 2. It is fair to say that the Scala
@@ -4453,31 +4678,32 @@ Returning to `Foldable` for a moment, we can reveal some methods that
 we did not discuss earlier
 
 {lang="text"}
-~~~~~~~~
+
+```
   @typeclass trait Foldable[F[_]] {
     ...
     def msuml[G[_]: PlusEmpty, A](fa: F[G[A]]): G[A] = ...
     def collapse[X[_]: ApplicativePlus, A](x: F[A]): X[A] = ...
     ...
   }
-~~~~~~~~
+```
 
 `msuml` does a `fold` using the `Monoid` from the `PlusEmpty[G]` and
 `collapse` does a `foldRight` using the `PlusEmpty` of the target
 type:
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> IList(Option(1), Option.empty[Int], Option(2)).fold
   res: Option[Int] = Some(3) // uses Monoid[Option[Int]]
-  
+
   scala> IList(Option(1), Option.empty[Int], Option(2)).msuml
   res: Option[Int] = Some(1) // uses PlusEmpty[Option].monoid
-  
+
   scala> IList(1, 2).collapse[Option]
   res: Option[Int] = Some(1)
-~~~~~~~~
-
+```
 
 ## Lone Wolves
 
@@ -4487,23 +4713,23 @@ larger hierarchy.
 {width=80%}
 ![](images/scalaz-loners.png)
 
-
 ### Zippy
 
 {lang="text"}
-~~~~~~~~
+
+```
   @typeclass trait Zip[F[_]]  {
     def zip[A, B](a: =>F[A], b: =>F[B]): F[(A, B)]
-  
+
     def zipWith[A, B, C](fa: =>F[A], fb: =>F[B])(f: (A, B) => C)
                         (implicit F: Functor[F]): F[C] = ...
-  
+
     def ap(implicit F: Functor[F]): Apply[F] = ...
-  
+
     @op("<*|*>") def apzip[A, B](f: =>F[A] => F[B], a: =>F[A]): F[(A, B)] = ...
-  
+
   }
-~~~~~~~~
+```
 
 The core method is `zip` which is a less powerful version of
 `Divide.tuple2`, and if a `Functor[F]` is provided then `zipWith` can
@@ -4516,18 +4742,19 @@ producing an `F[(A, B)]` similar to `Functor.fproduct`.
 A> `<*|*>` is the creepy Jawa operator.
 
 {lang="text"}
-~~~~~~~~
+
+```
   @typeclass trait Unzip[F[_]]  {
     @op("unfzip") def unzip[A, B](a: F[(A, B)]): (F[A], F[B])
-  
+
     def firsts[A, B](a: F[(A, B)]): F[A] = ...
     def seconds[A, B](a: F[(A, B)]): F[B] = ...
-  
+
     def unzip3[A, B, C](x: F[(A, (B, C))]): (F[A], F[B], F[C]) = ...
     ...
     def unzip7[A ... H](x: F[(A, (B, ... H))]): ...
   }
-~~~~~~~~
+```
 
 The core method is `unzip` with `firsts` and `seconds` allowing for
 selecting either the first or second element of a tuple in the `F`.
@@ -4538,15 +4765,15 @@ to save on boilerplate. For example, if handed a bunch of nested
 tuples, the `Unzip[Id]` is a handy way to flatten them:
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> Unzip[Id].unzip7((1, (2, (3, (4, (5, (6, 7)))))))
   res = (1,2,3,4,5,6,7)
-~~~~~~~~
+```
 
 In a nutshell, `Zip` and `Unzip` are less powerful versions of
 `Divide` and `Apply`, providing useful features without requiring the
 `F` to make too many promises.
-
 
 ### Optional
 
@@ -4558,28 +4785,30 @@ Recall that `\/` (*disjunction*) is Scalaz's improvement of
 `scala.Option`
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed abstract class Maybe[A]
   final case class Empty[A]()    extends Maybe[A]
   final case class Just[A](a: A) extends Maybe[A]
-~~~~~~~~
+```
 
 {lang="text"}
-~~~~~~~~
+
+```
   @typeclass trait Optional[F[_]] {
     def pextract[B, A](fa: F[A]): F[B] \/ A
-  
+
     def getOrElse[A](fa: F[A])(default: =>A): A = ...
     def orElse[A](fa: F[A])(alt: =>F[A]): F[A] = ...
-  
+
     def isDefined[A](fa: F[A]): Boolean = ...
     def nonEmpty[A](fa: F[A]): Boolean = ...
     def isEmpty[A](fa: F[A]): Boolean = ...
-  
+
     def toOption[A](fa: F[A]): Option[A] = ...
     def toMaybe[A](fa: F[A]): Maybe[A] = ...
   }
-~~~~~~~~
+```
 
 These are methods that should be familiar, except perhaps `pextract`,
 which is a way of letting the `F[_]` return some implementation
@@ -4589,23 +4818,24 @@ returns `Option[Nothing] \/ A`, i.e. `None \/ A`.
 Scalaz gives a ternary operator to things that have an `Optional`
 
 {lang="text"}
-~~~~~~~~
+
+```
   implicit class OptionalOps[F[_]: Optional, A](fa: F[A]) {
     def ?[X](some: =>X): Conditional[X] = new Conditional[X](some)
     final class Conditional[X](some: =>X) {
       def |(none: =>X): X = if (Optional[F].isDefined(fa)) some else none
     }
   }
-~~~~~~~~
+```
 
 for example
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> val knock_knock: Option[String] = ...
          knock_knock ? "who's there?" | "<tumbleweed>"
-~~~~~~~~
-
+```
 
 ## Co-things
 
@@ -4620,19 +4850,19 @@ signature of *thing* wherever we can.
 {width=80%}
 ![](images/scalaz-coloners.png)
 
-
 ### Cobind
 
 {lang="text"}
-~~~~~~~~
+
+```
   @typeclass trait Cobind[F[_]] extends Functor[F] {
     def cobind[A, B](fa: F[A])(f: F[A] => B): F[B]
   //def   bind[A, B](fa: F[A])(f: A => F[B]): F[B]
-  
+
     def cojoin[A](fa: F[A]): F[F[A]] = ...
   //def   join[A](ffa: F[F[A]]): F[A] = ...
   }
-~~~~~~~~
+```
 
 `cobind` (also known as `coflatmap`) takes an `F[A] => B` that acts on
 an `F[A]` rather than its elements. But this is not necessarily the
@@ -4644,7 +4874,7 @@ Compelling use-cases for `Cobind` are rare, although when shown in the
 to argue why any method should be less important than the others:
 
 | method      | parameter          |
-|----------- |------------------ |
+| ----------- | ------------------ |
 | `map`       | `A => B`           |
 | `contramap` | `B => A`           |
 | `xmap`      | `(A => B, B => A)` |
@@ -4652,16 +4882,16 @@ to argue why any method should be less important than the others:
 | `bind`      | `A => F[B]`        |
 | `cobind`    | `F[A] => B`        |
 
-
 ### Comonad
 
 {lang="text"}
-~~~~~~~~
+
+```
   @typeclass trait Comonad[F[_]] extends Cobind[F] {
     def copoint[A](p: F[A]): A
   //def   point[A](a: =>A): F[A]
   }
-~~~~~~~~
+```
 
 `.copoint` (also `.copure`) unwraps an element from its context. Effects do not
 typically have an instance of `Comonad` since would break referential
@@ -4674,26 +4904,29 @@ elements to the left of an element (`lefts`), the element itself (the `focus`),
 and all the elements to its right (`rights`).
 
 {lang="text"}
-~~~~~~~~
+
+```
   final case class Hood[A](lefts: IList[A], focus: A, rights: IList[A])
-~~~~~~~~
+```
 
 The `lefts` and `rights` should each be ordered with the nearest to
 the `focus` at the head, such that we can recover the original `IList`
 via `.toIList`
 
 {lang="text"}
-~~~~~~~~
+
+```
   object Hood {
     implicit class Ops[A](hood: Hood[A]) {
       def toIList: IList[A] = hood.lefts.reverse ::: hood.focus :: hood.rights
-~~~~~~~~
+```
 
 We can write methods that let us move the focus one to the left
 (`previous`) and one to the right (`next`)
 
 {lang="text"}
-~~~~~~~~
+
+```
   ...
       def previous: Maybe[Hood[A]] = hood.lefts match {
         case INil() => Empty()
@@ -4705,14 +4938,15 @@ We can write methods that let us move the focus one to the left
         case ICons(head, tail) =>
           Just(Hood(hood.focus :: hood.lefts, head, tail))
       }
-~~~~~~~~
+```
 
 By introducing `more` to repeatedly apply an optional function to
 `Hood` we can calculate *all* the `positions` that `Hood` can take in
 the list
 
 {lang="text"}
-~~~~~~~~
+
+```
   ...
       def more(f: Hood[A] => Maybe[Hood[A]]): IList[Hood[A]] =
         f(hood) match {
@@ -4725,12 +4959,13 @@ the list
         Hood(left, hood, right)
       }
     }
-~~~~~~~~
+```
 
 We can now implement `Comonad[Hood]`
 
 {lang="text"}
-~~~~~~~~
+
+```
   ...
     implicit val comonad: Comonad[Hood] = new Comonad[Hood] {
       def map[A, B](fa: Hood[A])(f: A => B): Hood[B] =
@@ -4740,13 +4975,14 @@ We can now implement `Comonad[Hood]`
       def copoint[A](fa: Hood[A]): A = fa.focus
     }
   }
-~~~~~~~~
+```
 
 `cojoin` gives us a `Hood[Hood[IList]]` containing all the possible
 neighbourhoods in our initial `IList`
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> val middle = Hood(IList(4, 3, 2, 1), 5, IList(6, 7, 8, 9))
   scala> middle.cojoin
   res = Hood(
@@ -4759,15 +4995,16 @@ neighbourhoods in our initial `IList`
            Hood([6,5,4,3,2,1],7,[8,9]),
            Hood([7,6,5,4,3,2,1],8,[9]),
            Hood([8,7,6,5,4,3,2,1],9,[])])
-~~~~~~~~
+```
 
 Indeed, `cojoin` is just `positions`! We can `override` it with a more
 direct (and performant) implementation
 
 {lang="text"}
-~~~~~~~~
+
+```
   override def cojoin[A](fa: Hood[A]): Hood[Hood[A]] = fa.positions
-~~~~~~~~
+```
 
 `Comonad` generalises the concept of `Hood` to arbitrary data
 structures. `Hood` is an example of a *zipper* (unrelated to `Zip`).
@@ -4778,27 +5015,26 @@ One application of a zipper is for *cellular automata*, which compute
 the value of each cell in the next generation by performing a
 computation based on the neighbourhood of that cell.
 
-
 ### Cozip
 
 {lang="text"}
-~~~~~~~~
+
+```
   @typeclass trait Cozip[F[_]] {
     def cozip[A, B](x: F[A \/ B]): F[A] \/ F[B]
   //def   zip[A, B](a: =>F[A], b: =>F[B]): F[(A, B)]
   //def unzip[A, B](a: F[(A, B)]): (F[A], F[B])
-  
+
     def cozip3[A, B, C](x: F[A \/ (B \/ C)]): F[A] \/ (F[B] \/ F[C]) = ...
     ...
     def cozip7[A ... H](x: F[(A \/ (... H))]): F[A] \/ (... F[H]) = ...
   }
-~~~~~~~~
+```
 
 Although named `cozip`, it is perhaps more appropriate to talk about
 its symmetry with `unzip`. Whereas `unzip` splits `F[_]` of tuples
 (products) into tuples of `F[_]`, `cozip` splits `F[_]` of
 disjunctions (coproducts) into disjunctions of `F[_]`.
-
 
 ## Bi-things
 
@@ -4814,32 +5050,33 @@ relatives that allow us to map both ways.
 ![](images/scalaz-bithings.png)
 
 {lang="text"}
-~~~~~~~~
+
+```
   @typeclass trait Bifunctor[F[_, _]] {
     def bimap[A, B, C, D](fab: F[A, B])(f: A => C, g: B => D): F[C, D]
-  
+
     @op("<-:") def leftMap[A, B, C](fab: F[A, B])(f: A => C): F[C, B] = ...
     @op(":->") def rightMap[A, B, D](fab: F[A, B])(g: B => D): F[A, D] = ...
     @op("<:>") def umap[A, B](faa: F[A, A])(f: A => B): F[B, B] = ...
   }
-  
+
   @typeclass trait Bifoldable[F[_, _]] {
     def bifoldMap[A, B, M: Monoid](fa: F[A, B])(f: A => M)(g: B => M): M
-  
+
     def bifoldRight[A,B,C](fa: F[A, B], z: =>C)(f: (A, =>C) => C)(g: (B, =>C) => C): C
     def bifoldLeft[A,B,C](fa: F[A, B], z: C)(f: (C, A) => C)(g: (C, B) => C): C = ...
-  
+
     def bifoldMap1[A, B, M: Semigroup](fa: F[A,B])(f: A => M)(g: B => M): Option[M] = ...
   }
-  
+
   @typeclass trait Bitraverse[F[_, _]] extends Bifunctor[F] with Bifoldable[F] {
     def bitraverse[G[_]: Applicative, A, B, C, D](fab: F[A, B])
                                                  (f: A => G[C])
                                                  (g: B => G[D]): G[F[C, D]]
-  
+
     def bisequence[G[_]: Applicative, A, B](x: F[G[A], G[B]]): G[F[A, B]] = ...
   }
-~~~~~~~~
+```
 
 A> `<-:` and `:->` are the happy operators!
 
@@ -4850,57 +5087,59 @@ same type so that their results can be combined with a `Monoid` or
 `Semigroup`.
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> val a: Either[String, Int] = Left("fail")
          val b: Either[String, Int] = Right(13)
-  
+
   scala> b.bimap(_.toUpperCase, _ * 2)
   res: Either[String, Int] = Right(26)
-  
+
   scala> a.bimap(_.toUpperCase, _ * 2)
   res: Either[String, Int] = Left(FAIL)
-  
+
   scala> b :-> (_ * 2)
   res: Either[String,Int] = Right(26)
-  
+
   scala> a :-> (_ * 2)
   res: Either[String, Int] = Left(fail)
-  
+
   scala> { s: String => s.length } <-: a
   res: Either[Int, Int] = Left(4)
-  
+
   scala> a.bifoldMap(_.length)(identity)
   res: Int = 4
-  
+
   scala> b.bitraverse(s => Future(s.length), i => Future(i))
   res: Future[Either[Int, Int]] = Future(<not completed>)
-~~~~~~~~
+```
 
 In addition, we can revisit `MonadPlus` (recall it is `Monad` with the
 ability to `filterWith` and `unite`) and see that it can `separate`
 `Bifoldable` contents of a `Monad`
 
 {lang="text"}
-~~~~~~~~
+
+```
   @typeclass trait MonadPlus[F[_]] {
     ...
     def separate[G[_, _]: Bifoldable, A, B](value: F[G[A, B]]): (F[A], F[B]) = ...
     ...
   }
-~~~~~~~~
+```
 
 This is very useful if we have a collection of bi-things and we want
 to reorganise them into a collection of `A` and a collection of `B`
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> val list: List[Either[Int, String]] =
            List(Right("hello"), Left(1), Left(2), Right("world"))
-  
+
   scala> list.separate
   res: (List[Int], List[String]) = (List(1, 2), List(hello, world))
-~~~~~~~~
-
+```
 
 ## Summary
 
@@ -4922,7 +5161,6 @@ To help further, Valentin Kasas explains how to [combine `N` things](https://twi
 
 {width=70%}
 ![](images/shortest-fp-book.png)
-
 
 # Scalaz Data Types
 
@@ -4957,13 +5195,11 @@ functionality is provided by optimised instances of the typeclasses we studied
 in the previous chapter. This makes it a lot easier to swap implementations for
 performance reasons, and to provide our own.
 
-
 ## Type Variance
 
 Many of Scalaz's data types are *invariant* in their type parameters.
 For example, `IList[A]` is **not** a subtype of `IList[B]` when `A <:
 B`.
-
 
 ### Covariance
 
@@ -4972,10 +5208,11 @@ List[+A]`, is that `List[A]` is a subtype of `List[Any]` and it is
 easy to accidentally lose type information.
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> List("hello") ++ List(' ') ++ List("world!")
   res: List[Any] = List(hello,  , world!)
-~~~~~~~~
+```
 
 Note that the second list is a `List[Char]` and the compiler has
 unhelpfully inferred the *Least Upper Bound* (LUB) to be `Any`.
@@ -4983,17 +5220,18 @@ Compare to `IList`, which requires explicit `.widen[Any]` to permit
 the heinous crime:
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> IList("hello") ++ IList(' ') ++ IList("world!")
   <console>:35: error: type mismatch;
    found   : Char(' ')
    required: String
-  
+
   scala> IList("hello").widen[Any]
            ++ IList(' ').widen[Any]
            ++ IList("world!").widen[Any]
   res: IList[Any] = [hello, ,world!]
-~~~~~~~~
+```
 
 Similarly, when the compiler infers a type `with Product with
 Serializable` it is a strong indicator that accidental widening has
@@ -5003,10 +5241,11 @@ Unfortunately we must be careful when constructing invariant data
 types because LUB calculations are performed on the parameters:
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> IList("hello", ' ', "world")
   res: IList[Any] = [hello, ,world]
-~~~~~~~~
+```
 
 Another similar problem arises from Scala's `Nothing` type, which is a subtype
 of all other types, including `sealed` ADTs, `final` classes, primitives and
@@ -5019,7 +5258,6 @@ a consequence is that we can write un-runnable code, by accident. Scalaz says we
 do not need covariant type parameters which means that we are limiting ourselves
 to writing practical code that can be run.
 
-
 ### Contrarivariance
 
 On the other hand, *contravariant* type parameters, such as `trait
@@ -5028,42 +5266,43 @@ Phillips' (ex-`scalac` team) demonstration of what he calls
 *contrarivariance*:
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> :paste
          trait Thing[-A]
          def f(x: Thing[ Seq[Int]]): Byte   = 1
          def f(x: Thing[List[Int]]): Short  = 2
-  
+
   scala> f(new Thing[ Seq[Int]] { })
          f(new Thing[List[Int]] { })
-  
+
   res = 1
   res = 2
-~~~~~~~~
+```
 
 As expected, the compiler is finding the most specific argument in
 each call to `f`. However, implicit resolution gives unexpected
 results:
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> :paste
          implicit val t1: Thing[ Seq[Int]] =
            new Thing[ Seq[Int]] { override def toString = "1" }
          implicit val t2: Thing[List[Int]] =
            new Thing[List[Int]] { override def toString = "2" }
-  
+
   scala> implicitly[Thing[ Seq[Int]]]
          implicitly[Thing[List[Int]]]
-  
+
   res = 1
   res = 1
-~~~~~~~~
+```
 
 Implicit resolution flips its definition of "most specific" for contravariant
 types, rendering them useless for typeclasses or anything that requires
 polymorphic functionality. The behaviour is fixed in Dotty.
-
 
 ### Limitations of subtyping
 
@@ -5073,21 +5312,23 @@ is unable to let us write the required type signature. Consider the
 following that appears correct, but has a subtle bug:
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed abstract class Option[+A] {
     def flatten[B, A <: Option[B]]: Option[B] = ...
   }
-~~~~~~~~
+```
 
 The `A` introduced on `.flatten` is shadowing the `A` introduced on
 the class. It is equivalent to writing
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed abstract class Option[+A] {
     def flatten[B, C <: Option[B]]: Option[B] = ...
   }
-~~~~~~~~
+```
 
 which is not the constraint we want.
 
@@ -5095,20 +5336,22 @@ To workaround this limitation, Scala defines infix classes `<:<` and
 `=:=` along with implicit evidence that always creates a *witness*
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed abstract class <:<[-From, +To] extends (From => To)
   implicit def conforms[A]: A <:< A = new <:<[A, A] { def apply(x: A): A = x }
-  
+
   sealed abstract class =:=[ From,  To] extends (From => To)
   implicit def tpEquals[A]: A =:= A = new =:=[A, A] { def apply(x: A): A = x }
-~~~~~~~~
+```
 
 `=:=` can be used to require that two type parameters are exactly the
 same and `<:<` is used to describe subtype relationships, letting us
 implement `.flatten` as
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed abstract class Option[+A] {
     def flatten[B](implicit ev: A <:< Option[B]): Option[B] = this match {
       case None        => None
@@ -5117,17 +5360,18 @@ implement `.flatten` as
   }
   final case class Some[+A](value: A) extends Option[A]
   case object None                    extends Option[Nothing]
-~~~~~~~~
+```
 
 Scalaz improves on `<:<` and `=:=` with *Liskov* (aliased to `<~<`)
 and *Leibniz* (`===`).
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed abstract class Liskov[-A, +B] {
     def apply(a: A): B = ...
     def subst[F[-_]](p: F[B]): F[A]
-  
+
     def andThen[C](that: Liskov[B, C]): Liskov[A, C] = ...
     def onF[X](fa: X => A): X => B = ...
     ...
@@ -5135,19 +5379,19 @@ and *Leibniz* (`===`).
   object Liskov {
     type <~<[-A, +B] = Liskov[A, B]
     type >~>[+B, -A] = Liskov[A, B]
-  
+
     implicit def refl[A]: (A <~< A) = ...
     implicit def isa[A, B >: A]: A <~< B = ...
-  
+
     implicit def witness[A, B](lt: A <~< B): A => B = ...
     ...
   }
-  
+
   // type signatures have been simplified
   sealed abstract class Leibniz[A, B] {
     def apply(a: A): B = ...
     def subst[F[_]](p: F[A]): F[B]
-  
+
     def flip: Leibniz[B, A] = ...
     def andThen[C](that: Leibniz[B, C]): Leibniz[A, C] = ...
     def onF[X](fa: X => A): X => B = ...
@@ -5155,14 +5399,14 @@ and *Leibniz* (`===`).
   }
   object Leibniz {
     type ===[A, B] = Leibniz[A, B]
-  
+
     implicit def refl[A]: Leibniz[A, A] = ...
-  
+
     implicit def subst[A, B](a: A)(implicit f: A === B): B = ...
     implicit def witness[A, B](f: A === B): A => B = ...
     ...
   }
-~~~~~~~~
+```
 
 Other than generally useful methods and implicit conversions, the
 Scalaz `<~<` and `===` evidence is more principled than in the stdlib.
@@ -5174,7 +5418,6 @@ A> Gottfried Wilhelm Leibniz basically invented *everything* in the 17th
 A> century. He believed in a [God called Monad](https://en.wikipedia.org/wiki/Monad_(philosophy)). Eugenio Moggi later reused
 A> the name for what we know as `scalaz.Monad`. Not a God, just a mere
 A> mortal.
-
 
 ## Evaluation
 
@@ -5198,7 +5441,8 @@ A> do not throw exceptions.
 Scalaz formalises the three evaluation strategies with an ADT
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed abstract class Name[A] {
     def value: A
   }
@@ -5206,7 +5450,7 @@ Scalaz formalises the three evaluation strategies with an ADT
     def apply[A](a: =>A) = new Name[A] { def value = a }
     ...
   }
-  
+
   sealed abstract class Need[A] extends Name[A]
   object Need {
     def apply[A](a: =>A): Need[A] = new Need[A] {
@@ -5215,9 +5459,9 @@ Scalaz formalises the three evaluation strategies with an ADT
     }
     ...
   }
-  
+
   final case class Value[A](value: A) extends Need[A]
-~~~~~~~~
+```
 
 The weakest form of evaluation is `Name`, giving no computational
 guarantees. Next is `Need`, guaranteeing *at most once* evaluation,
@@ -5251,11 +5495,11 @@ A> don't. Because, lazy.
 
 `Name` provides instances of the following typeclasses
 
--   `Monad`
--   `Comonad`
--   `Traverse1`
--   `Align`
--   `Zip` / `Unzip` / `Cozip`
+- `Monad`
+- `Comonad`
+- `Traverse1`
+- `Align`
+- `Zip` / `Unzip` / `Cozip`
 
 A> *by-name* and *lazy* are not the free lunch they appear to be. When
 A> Scala converts *by-name* parameters and `lazy val` into bytecode,
@@ -5267,7 +5511,6 @@ A> benefit unless there is the possibility of **not** evaluating. High
 A> performance code that runs in a tight loop and always evaluates will
 A> suffer.
 
-
 ## Memoisation
 
 Scalaz has the capability to memoise functions, formalised by `Memo`,
@@ -5275,22 +5518,23 @@ which doesn't make any guarantees about evaluation because of the
 diversity of implementations:
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed abstract class Memo[K, V] {
     def apply(z: K => V): K => V
   }
   object Memo {
     def memo[K, V](f: (K => V) => K => V): Memo[K, V]
-  
+
     def nilMemo[K, V]: Memo[K, V] = memo[K, V](identity)
-  
+
     def arrayMemo[V >: Null : ClassTag](n: Int): Memo[Int, V] = ...
     def doubleArrayMemo(n: Int, sentinel: Double = 0.0): Memo[Int, Double] = ...
-  
+
     def immutableHashMapMemo[K, V]: Memo[K, V] = ...
     def immutableTreeMapMemo[K: scala.Ordering, V]: Memo[K, V] = ...
   }
-~~~~~~~~
+```
 
 `memo` allows us to create custom implementations of `Memo`, `nilMemo`
 doesn't memoise, evaluating the function normally. The remaining
@@ -5301,35 +5545,37 @@ To use `Memo` we simply wrap a function with a `Memo` implementation
 and then call the memoised function:
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> def foo(n: Int): String = {
            println("running")
            if (n > 10) "wibble" else "wobble"
          }
-  
+
   scala> val mem = Memo.arrayMemo[String](100)
          val mfoo = mem(foo)
-  
+
   scala> mfoo(1)
   running // evaluated
   res: String = wobble
-  
+
   scala> mfoo(1)
   res: String = wobble // memoised
-~~~~~~~~
+```
 
 If the function takes more than one parameter, we must `tupled` the
 method, with the memoised version taking a tuple.
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> def bar(n: Int, m: Int): String = "hello"
          val mem = Memo.immutableHashMapMemo[(Int, Int), String]
          val mbar = mem((bar _).tupled)
-  
+
   scala> mbar((1, 2))
   res: String = "hello"
-~~~~~~~~
+```
 
 `Memo` is typically treated as a special construct and the usual rule
 about *purity* is relaxed for implementations. To be pure only
@@ -5341,7 +5587,6 @@ signature. Other functional programming languages have automatic
 memoisation managed by their runtime environment and `Memo` is our way
 of extending the JVM to have similar support, unfortunately only on an
 opt-in basis.
-
 
 ## Tagging
 
@@ -5365,14 +5610,15 @@ is how we trick the compiler into allowing us to define an infix type `A @@ T`
 that is erased to `A` at runtime:
 
 {lang="text"}
-~~~~~~~~
+
+```
   type @@[A, T] = Tag.k.@@[A, T]
-  
+
   object Tag {
     @inline val k: TagKind = IdTagKind
     @inline def apply[A, T](a: A): A @@ T = k(a)
     ...
-  
+
     final class TagOf[T] private[Tag]() { ... }
     def of[T]: TagOf[T] = new TagOf[T]
   }
@@ -5386,33 +5632,34 @@ that is erased to `A` at runtime:
     @inline override def apply[A, T](a: A): A = a
     ...
   }
-~~~~~~~~
+```
 
 A> i.e. we tag things with Princess Leia hair buns `@@`.
 
 Some useful tags are provided in the `Tags` object
 
 {lang="text"}
-~~~~~~~~
+
+```
   object Tags {
     sealed trait First
     val First = Tag.of[First]
-  
+
     sealed trait Last
     val Last = Tag.of[Last]
-  
+
     sealed trait Multiplication
     val Multiplication = Tag.of[Multiplication]
-  
+
     sealed trait Disjunction
     val Disjunction = Tag.of[Disjunction]
-  
+
     sealed trait Conjunction
     val Conjunction = Tag.of[Conjunction]
-  
+
     ...
   }
-~~~~~~~~
+```
 
 `First` / `Last` are used to select `Monoid` instances that pick the first or
 last non-zero operand. `Multiplication` is for numeric multiplication instead of
@@ -5424,14 +5671,16 @@ In our `TradeTemplate`, instead of using `Option[Currency]` we can use
 built-in alias, `LastOption`
 
 {lang="text"}
-~~~~~~~~
+
+```
   type LastOption[A] = Option[A] @@ Tags.Last
-~~~~~~~~
+```
 
 letting us write a much cleaner `Monoid[TradeTemplate]`
 
 {lang="text"}
-~~~~~~~~
+
+```
   final case class TradeTemplate(
     payments: List[java.time.LocalDate],
     ccy: LastOption[Currency],
@@ -5446,7 +5695,7 @@ letting us write a much cleaner `Monoid[TradeTemplate]`
         TradeTemplate(Nil, Tag(None), Tag(None))
     )
   }
-~~~~~~~~
+```
 
 To create a raw value of type `LastOption`, we apply `Tag` to an `Option`. Here
 we are calling `Tag(None)`.
@@ -5460,7 +5709,6 @@ checks on the content of the runtime value. `Tag` should only be used for
 typeclass selection purposes. Prefer the `Refined` library, introduced in
 Chapter 4, to constrain values.
 
-
 ## Natural Transformations
 
 A function from one type to another is written as `A => B` in Scala, which is
@@ -5471,37 +5719,40 @@ These `F ~> G` are called *natural transformations* and are *universally
 quantified* because they don't care about the contents of `F[_]`.
 
 {lang="text"}
-~~~~~~~~
+
+```
   type ~>[-F[_], +G[_]] = NaturalTransformation[F, G]
   trait NaturalTransformation[-F[_], +G[_]] {
     def apply[A](fa: F[A]): G[A]
-  
+
     def compose[E[_]](f: E ~> F): E ~> G = ...
     def andThen[H[_]](f: G ~> H): F ~> H = ...
   }
-~~~~~~~~
+```
 
 An example of a natural transformation is a function that converts an `IList`
 into a `List`
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> val convert = new (IList ~> List) {
            def apply[A](fa: IList[A]): List[A] = fa.toList
          }
-  
+
   scala> convert(IList(1, 2, 3))
   res: List[Int] = List(1, 2, 3)
-~~~~~~~~
+```
 
 Or, more concisely, making use of `kind-projector`'s syntax sugar:
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> val convert = λ[IList ~> List](_.toList)
-  
+
   scala> val convert = Lambda[IList ~> List](_.toList)
-~~~~~~~~
+```
 
 However, in day-to-day development, it is far more likely that we will use a
 natural transformation to map between algebras. For example, in
@@ -5510,7 +5761,6 @@ natural transformation to map between algebras. For example, in
 changing all our business logic and tests to use this new `BigMachines`
 interface, we may be able to write a transformation from `Machines ~>
 BigMachines`. We will return to this idea in the chapter on Advanced Monads.
-
 
 ## `Isomorphism`
 
@@ -5524,7 +5774,8 @@ equivalent to" relationship between two types. There are three variants, to
 account for types of different shapes:
 
 {lang="text"}
-~~~~~~~~
+
+```
   object Isomorphism {
     trait Iso[Arr[_, _], A, B] {
       def to: Arr[A, B]
@@ -5535,7 +5786,7 @@ account for types of different shapes:
     object IsoSet {
       def apply[A, B](to: A => B, from: B => A): A <=> B = ...
     }
-  
+
     trait Iso2[Arr[_[_], _[_]], F[_], G[_]] {
       def to: Arr[F, G]
       def from: Arr[G, F]
@@ -5545,17 +5796,17 @@ account for types of different shapes:
     object IsoFunctor {
       def apply[F[_], G[_]](to: F ~> G, from: G ~> F): F <~> G = ...
     }
-  
+
     trait Iso3[Arr[_[_, _], _[_, _]], F[_, _], G[_, _]] {
       def to: Arr[F, G]
       def from: Arr[G, F]
     }
     type IsoBifunctor[F[_, _], G[_, _]] = Iso3[~~>, F, G]
     type <~~>[F[_, _], G[_, _]] = IsoBifunctor[F, G]
-  
+
     ...
   }
-~~~~~~~~
+```
 
 The type aliases `IsoSet`, `IsoFunctor` and `IsoBifunctor` cover the common
 cases: a regular function, natural transformation and binatural. Convenience
@@ -5564,34 +5815,34 @@ transformations. However, it is often easier to use one of the abstract
 `Template` classes to define an isomorphism. For example:
 
 {lang="text"}
-~~~~~~~~
+
+```
   val listIListIso: List <~> IList =
     new IsoFunctorTemplate[List, IList] {
       def to[A](fa: List[A]) = fromList(fa)
       def from[A](fa: IList[A]) = fa.toList
     }
-~~~~~~~~
+```
 
 If we introduce an isomorphism, we can generate many of the standard
 typeclasses. For example
 
 {lang="text"}
-~~~~~~~~
+
+```
   trait IsomorphismSemigroup[F, G] extends Semigroup[F] {
     implicit def G: Semigroup[G]
     def iso: F <=> G
     def append(f1: F, f2: =>F): F = iso.from(G.append(iso.to(f1), iso.to(f2)))
   }
-~~~~~~~~
+```
 
 allows us to derive a `Semigroup[F]` for a type `F` if we have an `F <=> G` and
 a `Semigroup[G]`. Almost all the typeclasses in the hierarchy provide an
 isomorphic variant. If we find ourselves copying and pasting a typeclass
 implementation, it is worth considering if `Isomorphism` is the better solution.
 
-
 ## Containers
-
 
 ### Maybe
 
@@ -5604,20 +5855,21 @@ present or not without giving any extra context as to why it may be
 missing.
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed abstract class Maybe[A] { ... }
   object Maybe {
     final case class Empty[A]()    extends Maybe[A]
     final case class Just[A](a: A) extends Maybe[A]
-  
+
     def empty[A]: Maybe[A] = Empty()
     def just[A](a: A): Maybe[A] = Just(a)
-  
+
     def fromOption[A](oa: Option[A]): Maybe[A] = ...
     def fromNullable[A](a: A): Maybe[A] = if (null == a) empty else just(a)
     ...
   }
-~~~~~~~~
+```
 
 The `.empty` and `.just` companion methods are preferred to creating
 raw `Empty` or `Just` instances because they return a `Maybe`, helping
@@ -5629,49 +5881,51 @@ A convenient `implicit class` allows us to call `.just` on any value
 and receive a `Maybe`
 
 {lang="text"}
-~~~~~~~~
+
+```
   implicit class MaybeOps[A](self: A) {
     def just: Maybe[A] = Maybe.just(self)
   }
-~~~~~~~~
+```
 
 `Maybe` has a typeclass instance for all the things
 
--   `Align`
--   `Traverse`
--   `MonadPlus` / `IsEmpty`
--   `Cobind`
--   `Cozip` / `Zip` / `Unzip`
--   `Optional`
+- `Align`
+- `Traverse`
+- `MonadPlus` / `IsEmpty`
+- `Cobind`
+- `Cozip` / `Zip` / `Unzip`
+- `Optional`
 
 and delegate instances depending on `A`
 
--   `Monoid` / `Band`
--   `Equal` / `Order` / `Show`
+- `Monoid` / `Band`
+- `Equal` / `Order` / `Show`
 
 In addition to the above, `Maybe` has functionality that is not supported by a
 polymorphic typeclass.
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed abstract class Maybe[A] {
     def cata[B](f: A => B, b: =>B): B = this match {
       case Just(a) => f(a)
       case Empty() => b
     }
-  
+
     def |(a: =>A): A = cata(identity, a)
     def toLeft[B](b: =>B): A \/ B = cata(\/.left, \/-(b))
     def toRight[B](b: =>B): B \/ A = cata(\/.right, -\/(b))
     def <\/[B](b: =>B): A \/ B = toLeft(b)
     def \/>[B](b: =>B): B \/ A = toRight(b)
-  
+
     def orZero(implicit A: Monoid[A]): A = getOrElse(A.zero)
     def orEmpty[F[_]: Applicative: PlusEmpty]: F[A] =
       cata(Applicative[F].point(_), PlusEmpty[F].empty)
     ...
   }
-~~~~~~~~
+```
 
 `.cata` is a terser alternative to `.map(f).getOrElse(b)` and has the
 simpler form `|` if the map is `identity` (i.e. just `.getOrElse`).
@@ -5686,22 +5940,23 @@ empty container, not forgetting that we already get support for stdlib
 collections from the `Foldable` instance's `.to` method.
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> 1.just.orZero
   res: Int = 1
-  
+
   scala> Maybe.empty[Int].orZero
   res: Int = 0
-  
+
   scala> Maybe.empty[Int].orEmpty[IList]
   res: IList[Int] = []
-  
+
   scala> 1.just.orEmpty[IList]
   res: IList[Int] = [1]
-  
+
   scala> 1.just.to[List] // from Foldable
   res: List[Int] = List(1)
-~~~~~~~~
+```
 
 A> Methods are defined in OOP style on `Maybe`, contrary to our Chapter 4
 A> lesson to use an `object` or `implicit class`. This is a common theme
@@ -5730,38 +5985,39 @@ A>
 A> However, recent versions of Scala have addressed many bugs and we are
 A> now less likely to encounter problems.
 
-
 ### Either
 
 Scalaz's improvement over `scala.Either` is symbolic, but it is common
 to speak about it as *either* or `Disjunction`
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed abstract class \/[+A, +B] { ... }
   final case class -\/[+A](a: A) extends (A \/ Nothing)
   final case class \/-[+B](b: B) extends (Nothing \/ B)
-  
+
   type Disjunction[+A, +B] = \/[A, B]
-  
+
   object \/ {
     def left [A, B]: A => A \/ B = -\/(_)
     def right[A, B]: B => A \/ B = \/-(_)
-  
+
     def fromEither[A, B](e: Either[A, B]): A \/ B = ...
     ...
   }
-~~~~~~~~
+```
 
 with corresponding syntax
 
 {lang="text"}
-~~~~~~~~
+
+```
   implicit class EitherOps[A](val self: A) {
     final def left [B]: (A \/ B) = -\/(self)
     final def right[B]: (B \/ A) = \/-(self)
   }
-~~~~~~~~
+```
 
 allowing for easy construction of values. Note that the extension
 method takes the type of the *other side*. So if we wish to create a
@@ -5769,13 +6025,14 @@ method takes the type of the *other side*. So if we wish to create a
 calling `.right`
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> 1.right[String]
   res: String \/ Int = \/-(1)
-  
+
   scala> "hello".left[Int]
   res: String \/ Int = -\/(hello)
-~~~~~~~~
+```
 
 The symbolic nature of `\/` makes it read well in type signatures when
 shown infix. Note that symbolic types in Scala associate from the left
@@ -5784,46 +6041,47 @@ and nested `\/` must have parentheses, e.g. `(A \/ (B \/ (C \/ D))`.
 `\/` has right-biased (i.e. `flatMap` applies to `\/-`) typeclass
 instances for:
 
--   `Monad` / `MonadError`
--   `Traverse` / `Bitraverse`
--   `Plus`
--   `Optional`
--   `Cozip`
+- `Monad` / `MonadError`
+- `Traverse` / `Bitraverse`
+- `Plus`
+- `Optional`
+- `Cozip`
 
 and depending on the contents
 
--   `Equal` / `Order`
--   `Semigroup` / `Monoid` / `Band`
+- `Equal` / `Order`
+- `Semigroup` / `Monoid` / `Band`
 
 In addition, there are custom methods
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed abstract class \/[+A, +B] { self =>
     def fold[X](l: A => X, r: B => X): X = self match {
       case -\/(a) => l(a)
       case \/-(b) => r(b)
     }
-  
+
     def swap: (B \/ A) = self match {
       case -\/(a) => \/-(a)
       case \/-(b) => -\/(b)
     }
-  
+
     def |[BB >: B](x: =>BB): BB = getOrElse(x) // Optional[_]
     def |||[C, BB >: B](x: =>C \/ BB): C \/ BB = orElse(x) // Optional[_]
-  
+
     def +++[AA >: A: Semigroup, BB >: B: Semigroup](x: =>AA \/ BB): AA \/ BB = ...
-  
+
     def toEither: Either[A, B] = ...
-  
+
     final class SwitchingDisjunction[X](right: =>X) {
       def <<?:(left: =>X): X = ...
     }
     def :?>>[X](right: =>X) = new SwitchingDisjunction[X](right)
     ...
   }
-~~~~~~~~
+```
 
 `.fold` is similar to `Maybe.cata` and requires that both the left and
 right sides are mapped to the same type.
@@ -5836,10 +6094,10 @@ The `|` alias to `getOrElse` appears similarly to `Maybe`. We also get
 `+++` is for combining disjunctions with lefts taking preference over
 right:
 
--   `right(v1) +++ right(v2)` gives `right(v1 |+| v2)`
--   `right(v1) +++ left (v2)` gives `left (v2)`
--   `left (v1) +++ right(v2)` gives `left (v1)`
--   `left (v1) +++ left (v2)` gives `left (v1 |+| v2)`
+- `right(v1) +++ right(v2)` gives `right(v1 |+| v2)`
+- `right(v1) +++ left (v2)` gives `left (v2)`
+- `left (v1) +++ right(v2)` gives `left (v1)`
+- `left (v1) +++ left (v2)` gives `left (v1 |+| v2)`
 
 `.toEither` is provided for backwards compatibility with the Scala
 stdlib.
@@ -5848,14 +6106,14 @@ The combination of `:?>>` and `<<?:` allow for a convenient syntax to
 ignore the contents of an `\/`, but pick a default based on its type
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> 1 <<?: foo :?>> 2
   res: Int = 2 // foo is a \/-
-  
+
   scala> 1 <<?: foo.swap :?>> 2
   res: Int = 1
-~~~~~~~~
-
+```
 
 ### Validation
 
@@ -5863,54 +6121,56 @@ At first sight, `Validation` (aliased with `\?/`, *happy Elvis*)
 appears to be a clone of `Disjunction`:
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed abstract class Validation[+E, +A] { ... }
   final case class Success[A](a: A) extends Validation[Nothing, A]
   final case class Failure[E](e: E) extends Validation[E, Nothing]
-  
+
   type ValidationNel[E, +X] = Validation[NonEmptyList[E], X]
-  
+
   object Validation {
     type \?/[+E, +A] = Validation[E, A]
-  
+
     def success[E, A]: A => Validation[E, A] = Success(_)
     def failure[E, A]: E => Validation[E, A] = Failure(_)
     def failureNel[E, A](e: E): ValidationNel[E, A] = Failure(NonEmptyList(e))
-  
+
     def lift[E, A](a: A)(f: A => Boolean, fail: E): Validation[E, A] = ...
     def liftNel[E, A](a: A)(f: A => Boolean, fail: E): ValidationNel[E, A] = ...
     def fromEither[E, A](e: Either[E, A]): Validation[E, A] = ...
     ...
   }
-~~~~~~~~
+```
 
 With convenient syntax
 
 {lang="text"}
-~~~~~~~~
+
+```
   implicit class ValidationOps[A](self: A) {
     def success[X]: Validation[X, A] = Validation.success[X, A](self)
     def successNel[X]: ValidationNel[X, A] = success
     def failure[X]: Validation[A, X] = Validation.failure[A, X](self)
     def failureNel[X]: ValidationNel[A, X] = Validation.failureNel[A, X](self)
   }
-~~~~~~~~
+```
 
 However, the data structure itself is not the complete story.
 `Validation` intentionally does not have an instance of any `Monad`,
 restricting itself to success-biased versions of:
 
--   `Applicative`
--   `Traverse` / `Bitraverse`
--   `Cozip`
--   `Plus`
--   `Optional`
+- `Applicative`
+- `Traverse` / `Bitraverse`
+- `Cozip`
+- `Plus`
+- `Optional`
 
 and depending on the contents
 
--   `Equal` / `Order`
--   `Show`
--   `Semigroup` / `Monoid`
+- `Equal` / `Order`
+- `Show`
+- `Semigroup` / `Monoid`
 
 The big advantage of restricting to `Applicative` is that `Validation`
 is explicitly for situations where we wish to report all failures,
@@ -5922,35 +6182,37 @@ Consider performing input validation of data provided by a user using
 `Disjunction` and `flatMap`:
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> :paste
          final case class Credentials(user: Username, name: Fullname)
          final case class Username(value: String) extends AnyVal
          final case class Fullname(value: String) extends AnyVal
-  
+
          def username(in: String): String \/ Username =
            if (in.isEmpty) "empty username".left
            else if (in.contains(" ")) "username contains spaces".left
            else Username(in).right
-  
+
          def realname(in: String): String \/ Fullname =
            if (in.isEmpty) "empty real name".left
            else Fullname(in).right
-  
+
   scala> for {
            u <- username("sam halliday")
            r <- realname("")
          } yield Credentials(u, r)
   res = -\/(username contains spaces)
-~~~~~~~~
+```
 
 If we use `|@|` syntax
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> (username("sam halliday") |@| realname("")) (Credentials.apply)
   res = -\/(username contains spaces)
-~~~~~~~~
+```
 
 we still get back the first failure. This is because `Disjunction` is
 a `Monad`, its `.applyX` methods must be consistent with `.flatMap`
@@ -5958,20 +6220,21 @@ and not assume that any operations can be performed out of order.
 Compare to:
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> :paste
          def username(in: String): ValidationNel[String, Username] =
            if (in.isEmpty) "empty username".failureNel
            else if (in.contains(" ")) "username contains spaces".failureNel
            else Username(in).success
-  
+
          def realname(in: String): ValidationNel[String, Fullname] =
            if (in.isEmpty) "empty real name".failureNel
            else Fullname(in).success
-  
+
   scala> (username("sam halliday") |@| realname("")) (Credentials.apply)
   res = Failure(NonEmpty[username contains spaces,empty real name])
-~~~~~~~~
+```
 
 This time, we get back all the failures!
 
@@ -5979,22 +6242,23 @@ This time, we get back all the failures!
 `.fold`, `.swap` and `+++`, plus some extra:
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed abstract class Validation[+E, +A] {
     def append[F >: E: Semigroup, B >: A: Semigroup](x: F \?/ B]): F \?/ B = ...
-  
+
     def disjunction: (E \/ A) = ...
     ...
   }
-~~~~~~~~
+```
 
 `.append` (aliased by `+|+`) has the same type signature as `+++` but
 prefers the `success` case
 
--   `failure(v1) +|+ failure(v2)` gives `failure(v1 |+| v2)`
--   `failure(v1) +|+ success(v2)` gives `success(v2)`
--   `success(v1) +|+ failure(v2)` gives `success(v1)`
--   `success(v1) +|+ success(v2)` gives `success(v1 |+| v2)`
+- `failure(v1) +|+ failure(v2)` gives `failure(v1 |+| v2)`
+- `failure(v1) +|+ success(v2)` gives `success(v2)`
+- `success(v1) +|+ failure(v2)` gives `success(v1)`
+- `success(v1) +|+ success(v2)` gives `success(v1 |+| v2)`
 
 A> `+|+` the surprised c3p0 operator.
 
@@ -6019,30 +6283,31 @@ A> value depending on who calls it, thus breaking referential transparency.
 A> Regardless, throwing an exception is not pure because it means the function is
 A> not *Total*.
 
-
 ### These
 
 We encountered `These`, a data encoding of inclusive logical `OR`,
 when we learnt about `Align`.
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed abstract class \&/[+A, +B] { ... }
   object \&/ {
     type These[A, B] = A \&/ B
-  
+
     final case class This[A](aa: A) extends (A \&/ Nothing)
     final case class That[B](bb: B) extends (Nothing \&/ B)
     final case class Both[A, B](aa: A, bb: B) extends (A \&/ B)
-  
+
     def apply[A, B](a: A, b: B): These[A, B] = Both(a, b)
   }
-~~~~~~~~
+```
 
 with convenient construction syntax
 
 {lang="text"}
-~~~~~~~~
+
+```
   implicit class TheseOps[A](self: A) {
     final def wrapThis[B]: A \&/ B = \&/.This(self)
     final def wrapThat[B]: B \&/ A = \&/.That(self)
@@ -6050,36 +6315,37 @@ with convenient construction syntax
   implicit class ThesePairOps[A, B](self: (A, B)) {
     final def both: A \&/ B = \&/.Both(self._1, self._2)
   }
-~~~~~~~~
+```
 
 `These` has typeclass instances for
 
--   `Monad`
--   `Bitraverse`
--   `Traverse`
--   `Cobind`
+- `Monad`
+- `Bitraverse`
+- `Traverse`
+- `Cobind`
 
 and depending on contents
 
--   `Semigroup` / `Monoid` / `Band`
--   `Equal` / `Order`
--   `Show`
+- `Semigroup` / `Monoid` / `Band`
+- `Equal` / `Order`
+- `Show`
 
 `These` (`\&/`) has many of the methods we have come to expect of
 `Disjunction` (`\/`) and `Validation` (`\?/`)
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed abstract class \&/[+A, +B] {
     def fold[X](s: A => X, t: B => X, q: (A, B) => X): X = ...
     def swap: (B \&/ A) = ...
-  
+
     def append[X >: A: Semigroup, Y >: B: Semigroup](o: =>(X \&/ Y)): X \&/ Y = ...
-  
+
     def &&&[X >: A: Semigroup, C](t: X \&/ C): X \&/ (B, C) = ...
     ...
   }
-~~~~~~~~
+```
 
 `.append` has 9 possible arrangements and data is never thrown away
 because cases of `This` and `That` can always be converted into a
@@ -6098,24 +6364,24 @@ functions exist on the companion to deal with `EphemeralStream`
 (aliased here to fit in a single line) or anything with a `MonadPlus`
 
 {lang="text"}
-~~~~~~~~
+
+```
   type EStream[A] = EphemeralStream[A]
-  
+
   object \&/ {
     def concatThisStream[A, B](x: EStream[A \&/ B]): EStream[A] = ...
     def concatThis[F[_]: MonadPlus, A, B](x: F[A \&/ B]): F[A] = ...
-  
+
     def concatThatStream[A, B](x: EStream[A \&/ B]): EStream[B] = ...
     def concatThat[F[_]: MonadPlus, A, B](x: F[A \&/ B]): F[B] = ...
-  
+
     def unalignStream[A, B](x: EStream[A \&/ B]): (EStream[A], EStream[B]) = ...
     def unalign[F[_]: MonadPlus, A, B](x: F[A \&/ B]): (F[A], F[B]) = ...
-  
+
     def merge[A: Semigroup](t: A \&/ A): A = ...
     ...
   }
-~~~~~~~~
-
+```
 
 ### Higher Kinded Either
 
@@ -6123,20 +6389,20 @@ The `Coproduct` data type (not to be confused with the more general concept of a
 *coproduct* in an ADT) wraps `Disjunction` for type constructors:
 
 {lang="text"}
-~~~~~~~~
+
+```
   final case class Coproduct[F[_], G[_], A](run: F[A] \/ G[A]) { ... }
   object Coproduct {
     def leftc[F[_], G[_], A](x: F[A]): Coproduct[F, G, A] = Coproduct(-\/(x))
     def rightc[F[_], G[_], A](x: G[A]): Coproduct[F, G, A] = Coproduct(\/-(x))
     ...
   }
-~~~~~~~~
+```
 
 Typeclass instances simply delegate to those of the `F[_]` and `G[_]`.
 
 The most popular use case for `Coproduct` is when we want to create an anonymous
 coproduct of multiple ADTs.
-
 
 ### Not So Eager
 
@@ -6147,7 +6413,8 @@ For convenience, *by-name* alternatives to `Name` are provided, having
 the expected typeclass instances:
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed abstract class LazyTuple2[A, B] {
     def _1: A
     def _2: B
@@ -6159,20 +6426,19 @@ the expected typeclass instances:
     def _3: C
     def _4: D
   }
-  
+
   sealed abstract class LazyOption[+A] { ... }
   private final case class LazySome[A](a: () => A) extends LazyOption[A]
   private case object LazyNone extends LazyOption[Nothing]
-  
+
   sealed abstract class LazyEither[+A, +B] { ... }
   private case class LazyLeft[A, B](a: () => A) extends LazyEither[A, B]
   private case class LazyRight[A, B](b: () => B) extends LazyEither[A, B]
-~~~~~~~~
+```
 
 The astute reader will note that `Lazy*` is a misnomer, and these data
 types should perhaps be: `ByNameTupleX`, `ByNameOption` and
 `ByNameEither`.
-
 
 ### Const
 
@@ -6180,15 +6446,17 @@ types should perhaps be: `ByNameTupleX`, `ByNameOption` and
 spare type parameter `B`.
 
 {lang="text"}
-~~~~~~~~
+
+```
   final case class Const[A, B](getConst: A)
-~~~~~~~~
+```
 
 `Const` provides an instance of `Applicative[Const[A, ?]]` if there is a
 `Monoid[A]` available:
 
 {lang="text"}
-~~~~~~~~
+
+```
   implicit def applicative[A: Monoid]: Applicative[Const[A, ?]] =
     new Applicative[Const[A, ?]] {
       def point[B](b: =>B): Const[A, B] =
@@ -6196,7 +6464,7 @@ spare type parameter `B`.
       def ap[B, C](fa: =>Const[A, B])(fbc: =>Const[A, B => C]): Const[A, C] =
         Const(fbc.getConst |+| fa.getConst)
     }
-~~~~~~~~
+```
 
 The most important thing about this `Applicative` is that it ignores the `B`
 parameters, continuing on without failing and only combining the constant values
@@ -6207,14 +6475,15 @@ refactor our `logic.scala` file to use `Applicative` instead of `Monad`. We
 wrote `logic.scala` before we learnt about `Applicative` and now we know better:
 
 {lang="text"}
-~~~~~~~~
+
+```
   final class DynAgentsModule[F[_]: Applicative](D: Drone[F], M: Machines[F])
     extends DynAgents[F] {
     ...
     def act(world: WorldView): F[WorldView] = world match {
       case NeedsAgent(node) =>
         M.start(node) >| world.copy(pending = Map(node -> world.time))
-  
+
       case Stale(nodes) =>
         nodes.traverse { node =>
           M.stop(node) >| node
@@ -6222,27 +6491,28 @@ wrote `logic.scala` before we learnt about `Applicative` and now we know better:
           val updates = stopped.strengthR(world.time).toList.toMap
           world.copy(pending = world.pending ++ updates)
         }
-  
+
       case _ => world.pure[F]
     }
     ...
   }
-~~~~~~~~
+```
 
 Since our business logic only requires an `Applicative`, we can write mock
 implementations with `F[a]` as `Const[String, a]`. In each case, we return the
 name of the function that is called:
 
 {lang="text"}
-~~~~~~~~
+
+```
   object ConstImpl {
     type F[a] = Const[String, a]
-  
+
     private val D = new Drone[F] {
       def getBacklog: F[Int] = Const("backlog")
       def getAgents: F[Int]  = Const("agents")
     }
-  
+
     private val M = new Machines[F] {
       def getAlive: F[Map[MachineNode, Epoch]]     = Const("alive")
       def getManaged: F[NonEmptyList[MachineNode]] = Const("managed")
@@ -6250,25 +6520,26 @@ name of the function that is called:
       def start(node: MachineNode): F[Unit]        = Const("start")
       def stop(node: MachineNode): F[Unit]         = Const("stop")
     }
-  
+
     val program = new DynAgentsModule[F](D, M)
   }
-~~~~~~~~
+```
 
 With this interpretation of our program, we can assert on the methods that are
 called:
 
 {lang="text"}
-~~~~~~~~
+
+```
   it should "call the expected methods" in {
     import ConstImpl._
-  
+
     val alive    = Map(node1 -> time1, node2 -> time1)
     val world    = WorldView(1, 1, managed, alive, Map.empty, time4)
-  
+
     program.act(world).getConst shouldBe "stopstop"
   }
-~~~~~~~~
+```
 
 Alternatively, we could have counted total method calls by using `Const[Int, ?]`
 or an `IMap[String, Int]`.
@@ -6285,7 +6556,8 @@ implementations of `Drone` and `Machines` with `Const`, calling it from our
 wrapped version of `act`
 
 {lang="text"}
-~~~~~~~~
+
+```
   final class Monitored[U[_]: Functor](program: DynAgents[U]) {
     type F[a] = Const[Set[MachineNode], a]
     private val D = new Drone[F] {
@@ -6300,13 +6572,13 @@ wrapped version of `act`
       def stop(node: MachineNode): F[Unit]         = Const(Set(node))
     }
     val monitor = new DynAgentsModule[F](D, M)
-  
+
     def act(world: WorldView): U[(WorldView, Set[MachineNode])] = {
       val stopped = monitor.act(world).getConst
       program.act(world).strengthR(stopped)
     }
   }
-~~~~~~~~
+```
 
 We can do this because `monitor` is *pure* and running it produces no side
 effects.
@@ -6316,18 +6588,19 @@ This runs the program with `ConstImpl`, extracting all the calls to
 this:
 
 {lang="text"}
-~~~~~~~~
+
+```
   it should "monitor stopped nodes" in {
     val underlying = new Mutable(needsAgents).program
-  
+
     val alive = Map(node1 -> time1, node2 -> time1)
     val world = WorldView(1, 1, managed, alive, Map.empty, time4)
     val expected = world.copy(pending = Map(node1 -> time4, node2 -> time4))
-  
+
     val monitored = new Monitored(underlying)
     monitored.act(world) shouldBe (expected -> Set(node1, node2))
   }
-~~~~~~~~
+```
 
 We have used `Const` to do something that looks like *Aspect Oriented
 Programming*, once popular in Java. We built on top of our business logic to
@@ -6342,7 +6615,6 @@ possible. If we need to change our program to require a `Monad`, we can no
 longer use `Const` and must write full mocks to be able to assert on what is
 called under certain inputs. The *Rule of Least Power* demands that we use
 `Applicative` instead of `Monad` wherever we can.
-
 
 ## Collections
 
@@ -6359,21 +6631,20 @@ Because all the collection data types provide more or less the same list of
 typeclass instances, we shall avoid repeating the list, which is often some
 variation of:
 
--   `Monoid`
--   `Traverse` / `Foldable`
--   `MonadPlus` / `IsEmpty`
--   `Cobind` / `Comonad`
--   `Zip` / `Unzip`
--   `Align`
--   `Equal` / `Order`
--   `Show`
+- `Monoid`
+- `Traverse` / `Foldable`
+- `MonadPlus` / `IsEmpty`
+- `Cobind` / `Comonad`
+- `Zip` / `Unzip`
+- `Align`
+- `Equal` / `Order`
+- `Show`
 
 Data structures that are provably non-empty are able to provide
 
--   `Traverse1` / `Foldable1`
+- `Traverse1` / `Foldable1`
 
 and provide `Semigroup` instead of `Monoid`, `Plus` instead of `IsEmpty`.
-
 
 ### Lists
 
@@ -6381,7 +6652,8 @@ We have used `IList[A]` and `NonEmptyList[A]` so many times by now that they
 should be familiar. They codify a classic linked list data structure:
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed abstract class IList[A] {
     def ::(a: A): IList[A] = ...
     def :::(as: IList[A]): IList[A] = ...
@@ -6391,13 +6663,13 @@ should be familiar. They codify a classic linked list data structure:
   }
   final case class INil[A]() extends IList[A]
   final case class ICons[A](head: A, tail: IList[A]) extends IList[A]
-  
+
   final case class NonEmptyList[A](head: A, tail: IList[A]) {
     def <::(b: A): NonEmptyList[A] = nel(b, head :: tail)
     def <:::(bs: IList[A]): NonEmptyList[A] = ...
     ...
   }
-~~~~~~~~
+```
 
 A> The source code for Scalaz 7.3 reveals that `INil` is implemented as
 A> 
@@ -6428,9 +6700,10 @@ terrifying implementation that uses `var` to workaround performance
 problems in the stdlib collection design:
 
 {lang="text"}
-~~~~~~~~
+
+```
   package scala.collection.immutable
-  
+
   sealed abstract class List[+A]
     extends AbstractSeq[A]
     with LinearSeq[A]
@@ -6441,7 +6714,7 @@ problems in the stdlib collection design:
     override val head: B,
     private[scala] var tl: List[B]
   ) extends List[B] { ... }
-~~~~~~~~
+```
 
 `List` creation requires careful, and slow, `Thread` synchronisation
 to ensure safe publishing. `IList` requires no such hacks and can
@@ -6452,7 +6725,6 @@ A> But the difference is that `ICons` is part of the `IList` ADT whereas
 A> `NonEmptyList` is outside it. Typeclass instances should always be provided at
 A> the level of an ADT, not for each entry, to avoid complexity.
 
-
 ### `EphemeralStream`
 
 The stdlib `Stream` is a lazy version of `List`, but is riddled with
@@ -6462,7 +6734,8 @@ retention problem, and removing unsafe methods in the same spirit as
 `IList`.
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed abstract class EphemeralStream[A] {
     def headOption: Option[A]
     def tailOption: Option[EphemeralStream[A]]
@@ -6471,12 +6744,12 @@ retention problem, and removing unsafe methods in the same spirit as
   // private implementations
   object EphemeralStream extends EphemeralStreamInstances {
     type EStream[A] = EphemeralStream[A]
-  
+
     def emptyEphemeralStream[A]: EStream[A] = ...
     def cons[A](a: =>A, as: =>EStream[A]): EStream[A] = ...
     def unfold[A, B](start: =>B)(f: B => Option[(A, B)]): EStream[A] = ...
     def iterate[A](start: A)(f: A => A): EStream[A] = ...
-  
+
     implicit class ConsWrap[A](e: =>EStream[A]) {
       def ##::(h: A): EStream[A] = cons(h, e)
     }
@@ -6487,7 +6760,7 @@ retention problem, and removing unsafe methods in the same spirit as
     }
     ...
   }
-~~~~~~~~
+```
 
 A> The use of the word *stream* for a data structure of this nature comes down to
 A> legacy. *Stream* is now used by marketing departments alongside the ✨ *Reactive
@@ -6511,7 +6784,6 @@ still possible to suffer from *slow memory leaks* if a live reference
 points to the head of an infinite stream. Problems of this nature, as
 well as the need to compose effectful streams, are why fs2 exists.
 
-
 ### `CorecursiveList`
 
 *Corecursion* is when we start from a base state and produce subsequent steps
@@ -6519,9 +6791,10 @@ deterministically, like the `EphemeralStream.unfold` method that we just
 studied:
 
 {lang="text"}
-~~~~~~~~
+
+```
   def unfold[A, B](b: =>B)(f: B => Option[(A, B)]): EStream[A] = ...
-~~~~~~~~
+```
 
 Contrast to *recursion*, which breaks data into a base state and then
 terminates.
@@ -6530,31 +6803,31 @@ A `CorecursiveList` is a data encoding of `EphemeralStream.unfold`, offering an
 alternative to `EStream` that may perform better in some circumstances:
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed abstract class CorecursiveList[A] {
     type S
     def init: S
     def step: S => Maybe[(S, A)]
   }
-  
+
   object CorecursiveList {
     private final case class CorecursiveListImpl[S0, A](
       init: S0,
       step: S0 => Maybe[(S0, A)]
     ) extends CorecursiveList[A] { type S = S0 }
-  
+
     def apply[S, A](init: S)(step: S => Maybe[(S, A)]): CorecursiveList[A] =
       CorecursiveListImpl(init, step)
-  
+
     ...
   }
-~~~~~~~~
+```
 
 Corecursion is useful when implementing `Comonad.cojoin`, like our `Hood`
 example. `CorecursiveList` is a good way to codify non-linear recurrence
 equations like those used in biology population models, control systems, macro
 economics, and investment banking models.
-
 
 ### `ImmutableArray`
 
@@ -6562,7 +6835,8 @@ A simple wrapper around mutable stdlib `Array`, with primitive
 specialisations:
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed abstract class ImmutableArray[+A] {
     def ++[B >: A: ClassTag](o: ImmutableArray[B]): ImmutableArray[B]
     ...
@@ -6573,19 +6847,18 @@ specialisations:
     final class ofRef[A <: AnyRef](as: Array[A]) extends ImmutableArray1[A](as)
     ...
     final class ofLong(as: Array[Long]) extends ImmutableArray1[Long](as)
-  
+
     def fromArray[A](x: Array[A]): ImmutableArray[A] = ...
     def fromString(str: String): ImmutableArray[Char] = ...
     ...
   }
-~~~~~~~~
+```
 
 `Array` is unrivalled in terms of read performance and heap size.
 However, there is zero structural sharing when creating new arrays,
 therefore arrays are typically used only when their contents are not
 expected to change, or as a way of safely wrapping raw data from a
 legacy system.
-
 
 ### `Dequeue`
 
@@ -6595,11 +6868,12 @@ the back (`snoc`) in constant time. Removing an element from either
 end is constant time on average.
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed abstract class Dequeue[A] {
     def frontMaybe: Maybe[A]
     def backMaybe: Maybe[A]
-  
+
     def ++(o: Dequeue[A]): Dequeue[A] = ...
     def +:(a: A): Dequeue[A] = cons(a)
     def :+(a: A): Dequeue[A] = snoc(a)
@@ -6616,25 +6890,26 @@ end is constant time on average.
     back: NonEmptyList[A],
     backSize: Int) extends Dequeue[A] { ... }
   private final case object EmptyDequeue extends Dequeue[Nothing] { ... }
-  
+
   object Dequeue {
     def empty[A]: Dequeue[A] = EmptyDequeue()
     def apply[A](as: A*): Dequeue[A] = ...
     def fromFoldable[F[_]: Foldable, A](fa: F[A]): Dequeue[A] = ...
     ...
   }
-~~~~~~~~
+```
 
 The way it works is that there are two lists, one for the front data
 and another for the back. Consider an instance holding symbols `a0,
 a1, a2, a3, a4, a5, a6`
 
 {lang="text"}
-~~~~~~~~
+
+```
   FullDequeue(
     NonEmptyList('a0, IList('a1, 'a2, 'a3)), 4,
     NonEmptyList('a6, IList('a5, 'a4)), 3)
-~~~~~~~~
+```
 
 which can be visualised as
 
@@ -6658,16 +6933,16 @@ Re-balancing means that some operations can be slower than others
 happens only occasionally, we can take the average of the cost and say
 that it is constant.
 
-
 ### `DList`
 
 Linked lists have poor performance characteristics when large lists are appended
 together. Consider the work that goes into evaluating the following:
 
 {lang="text"}
-~~~~~~~~
+
+```
   ((as ::: bs) ::: (cs ::: ds)) ::: (es ::: (fs ::: gs))
-~~~~~~~~
+```
 
 {width=50%}
 ![](images/dlist-list-append.png)
@@ -6680,7 +6955,8 @@ scenario. Instead of performing the calculations at each stage, it is
 represented as a function `IList[A] => IList[A]`
 
 {lang="text"}
-~~~~~~~~
+
+```
   final case class DList[A](f: IList[A] => IList[A]) {
     def toIList: IList[A] = f(IList.empty)
     def ++(as: DList[A]): DList[A] = DList(xs => f(as.f(xs)))
@@ -6689,7 +6965,7 @@ represented as a function `IList[A] => IList[A]`
   object DList {
     def fromIList[A](as: IList[A]): DList[A] = DList(xs => as ::: xs)
   }
-~~~~~~~~
+```
 
 A> This is a simplified implementation: it has a stack overflow bug that we will
 A> fix in the chapter on Advanced Monads.
@@ -6697,16 +6973,18 @@ A> fix in the chapter on Advanced Monads.
 The equivalent calculation is (the symbols created via `DList.fromIList`)
 
 {lang="text"}
-~~~~~~~~
+
+```
   (((a ++ b) ++ (c ++ d)) ++ (e ++ (f ++ g))).toIList
-~~~~~~~~
+```
 
 which breaks the work into *right-associative* (i.e. fast) appends
 
 {lang="text"}
-~~~~~~~~
+
+```
   (as ::: (bs ::: (cs ::: (ds ::: (es ::: (fs ::: gs))))))
-~~~~~~~~
+```
 
 utilising the fast constructor on `IList`.
 
@@ -6715,13 +6993,13 @@ can slow down code that naturally results in right-associative appends. The
 largest speedup is when `IList` operations are *left-associative*, e.g.
 
 {lang="text"}
-~~~~~~~~
+
+```
   ((((((as ::: bs) ::: cs) ::: ds) ::: es) ::: fs) ::: gs)
-~~~~~~~~
+```
 
 Difference lists suffer from bad marketing. If they were called a
 `ListBuilderFactory` they'd probably be in the standard library.
-
 
 ### `ISet`
 
@@ -6736,7 +7014,8 @@ effectively rebuilds the entire tree.
 approximately balanced, using the `size` of each branch to balance a node.
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed abstract class ISet[A] {
     val size: Int = this match {
       case Tip()        => 0
@@ -6747,14 +7026,14 @@ approximately balanced, using the `size` of each branch to balance a node.
   object ISet {
     private final case class Tip[A]() extends ISet[A]
     private final case class Bin[A](a: A, l: ISet[A], r: ISet[A]) extends ISet[A]
-  
+
     def empty[A]: ISet[A] = Tip()
     def singleton[A](x: A): ISet[A] = Bin(x, Tip(), Tip())
     def fromFoldable[F[_]: Foldable, A: Order](xs: F[A]): ISet[A] =
       xs.foldLeft(empty[A])((a, b) => a insert b)
     ...
   }
-~~~~~~~~
+```
 
 `ISet` requires `A` to have an `Order`. The `Order[A]` instance must remain the
 same between calls or internal assumptions will be invalid, leading to data
@@ -6769,13 +7048,14 @@ constructing invalid trees. `.insert` is the only way to build an `ISet`,
 therefore defining what constitutes a valid tree.
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed abstract class ISet[A] {
     ...
     def contains(x: A)(implicit o: Order[A]): Boolean = ...
     def union(other: ISet[A])(implicit o: Order[A]): ISet[A] = ...
     def delete(x: A)(implicit o: Order[A]): ISet[A] = ...
-  
+
     def insert(x: A)(implicit o: Order[A]): ISet[A] = this match {
       case Tip() => ISet.singleton(x)
       case self @ Bin(y, l, r) => o.order(x, y) match {
@@ -6786,35 +7066,37 @@ therefore defining what constitutes a valid tree.
     }
     ...
   }
-~~~~~~~~
+```
 
 The internal methods `.balanceL` and `.balanceR` are mirrors of each other, so
 we only study `.balanceL`, which is called when the value we are inserting is
 *less than* the current node. It is also called by the `.delete` method.
 
 {lang="text"}
-~~~~~~~~
+
+```
   def balanceL[A](y: A, left: ISet[A], right: ISet[A]): ISet[A] = (left, right) match {
   ...
-~~~~~~~~
+```
 
 Balancing requires us to classify the scenarios that can occur. We will go
 through each possible scenario, visualising the `(y, left, right)` on the left
 side of the page, with the balanced structure on the right, also known as the
 *rotated tree*.
 
--   filled circles visualise a `Tip`
--   three columns visualise the `left | value | right` fields of `Bin`
--   diamonds visualise any `ISet`
+- filled circles visualise a `Tip`
+- three columns visualise the `left | value | right` fields of `Bin`
+- diamonds visualise any `ISet`
 
 The first scenario is the trivial case, which is when both the `left` and
 `right` are `Tip`. In fact we will never encounter this scenario from `.insert`,
 but we hit it in `.delete`
 
 {lang="text"}
-~~~~~~~~
+
+```
   case (Tip(), Tip()) => singleton(y)
-~~~~~~~~
+```
 
 {width=50%}
 ![](images/balanceL-1.png)
@@ -6823,9 +7105,10 @@ The second case is when `left` is a `Bin` containing only `Tip`, we don't need
 to balance anything, we just create the obvious connection:
 
 {lang="text"}
-~~~~~~~~
+
+```
   case (Bin(lx, Tip(), Tip()), Tip()) => Bin(y, left, Tip())
-~~~~~~~~
+```
 
 {width=60%}
 ![](images/balanceL-2.png)
@@ -6834,10 +7117,11 @@ The third case is when it starts to get interesting: `left` is a `Bin`
 containing a `Bin` in its `right`
 
 {lang="text"}
-~~~~~~~~
+
+```
   case (Bin(lx, Tip(), Bin(lrx, _, _)), Tip()) =>
     Bin(lrx, singleton(lx), singleton(y))
-~~~~~~~~
+```
 
 {width=70%}
 ![](images/balanceL-3.png)
@@ -6851,9 +7135,10 @@ where the diamonds are `Bin`.
 The fourth case is the opposite of the third case.
 
 {lang="text"}
-~~~~~~~~
+
+```
   case (Bin(lx, ll, Tip()), Tip()) => Bin(lx, ll, singleton(y))
-~~~~~~~~
+```
 
 {width=70%}
 ![](images/balanceL-4.png)
@@ -6862,12 +7147,13 @@ The fifth case is when we have full trees on both sides of the `left` and we
 must use their relative sizes to decide on how to re-balance.
 
 {lang="text"}
-~~~~~~~~
+
+```
   case (Bin(lx, ll, lr), Tip()) if (2*ll.size > lr.size) =>
     Bin(lx, ll, Bin(y, lr, Tip()))
   case (Bin(lx, ll, Bin(lrx, lrl, lrr)), Tip()) =>
     Bin(lrx, Bin(lx, ll, lrl), Bin(y, lrr, Tip()))
-~~~~~~~~
+```
 
 For the first branch, `2*ll.size > lr.size`
 
@@ -6884,9 +7170,10 @@ create the obvious connection. This scenario never arises from `.insert` because
 the `left` is always non-empty:
 
 {lang="text"}
-~~~~~~~~
+
+```
   case (Tip(), r) => Bin(y, Tip(), r)
-~~~~~~~~
+```
 
 {width=50%}
 ![](images/balanceL-6.png)
@@ -6896,9 +7183,10 @@ The final scenario is when we have non-empty trees on both sides. Unless the
 thing and create a new `Bin`
 
 {lang="text"}
-~~~~~~~~
+
+```
   case _ if l.size <= 3 * r.size => Bin(y, l, r)
-~~~~~~~~
+```
 
 {width=50%}
 ![](images/balanceL-7a.png)
@@ -6908,12 +7196,13 @@ must balance based on the relative sizes of `ll` and `lr`, like in scenario
 five.
 
 {lang="text"}
-~~~~~~~~
+
+```
   case (Bin(lx, ll, lr), r) if (2*ll.size > lr.size) =>
     Bin(lx, ll, Bin(y, lr, r))
   case (Bin(lx, ll, Bin(lrx, lrl, lrr)), r) =>
     Bin(lrx, Bin(lx, ll, lrl), Bin(y, lrr, r))
-~~~~~~~~
+```
 
 {width=60%}
 ![](images/balanceL-7b.png)
@@ -6931,13 +7220,14 @@ It is worth noting that some typeclass methods *cannot* be implemented as
 efficiently as we would like. Consider the signature of `Foldable.element`
 
 {lang="text"}
-~~~~~~~~
+
+```
   @typeclass trait Foldable[F[_]] {
     ...
     def element[A: Equal](fa: F[A], a: A): Boolean
     ...
   }
-~~~~~~~~
+```
 
 The obvious implementation for `.element` is to defer to (almost) binary-search
 `ISet.contains`. However, it is not possible because `.element` provides `Equal`
@@ -6949,11 +7239,11 @@ rebuilding the entire structure. It is sensible to convert to some other
 datatype, such as `IList`, perform the `.map`, and convert back. A consequence
 is that it is not possible to have `Traverse[ISet]` or `Applicative[ISet]`.
 
-
 ### `IMap`
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed abstract class ==>>[A, B] {
     val size: Int = this match {
       case Tip()           => 0
@@ -6962,7 +7252,7 @@ is that it is not possible to have `Traverse[ISet]` or `Applicative[ISet]`.
   }
   object ==>> {
     type IMap[A, B] = A ==>> B
-  
+
     private final case class Tip[A, B]() extends (A ==>> B)
     private final case class Bin[A, B](
       key: A,
@@ -6970,15 +7260,15 @@ is that it is not possible to have `Traverse[ISet]` or `Applicative[ISet]`.
       left: A ==>> B,
       right: A ==>> B
     ) extends ==>>[A, B]
-  
+
     def apply[A: Order, B](x: (A, B)*): A ==>> B = ...
-  
+
     def empty[A, B]: A ==>> B = Tip[A, B]()
     def singleton[A, B](k: A, x: B): A ==>> B = Bin(k, x, Tip(), Tip())
     def fromFoldable[F[_]: Foldable, A: Order, B](fa: F[(A, B)]): A ==>> B = ...
     ...
   }
-~~~~~~~~
+```
 
 This is very familiar! Indeed, `IMap` (an alias to the lightspeed operator
 `==>>`) is another size-balanced tree, but with an extra `value: B` field in
@@ -6987,15 +7277,15 @@ needs an `Order` and a suite of convenient methods are provided to allow easy
 entry updating
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed abstract class ==>>[A, B] {
     ...
     def adjust(k: A, f: B => B)(implicit o: Order[A]): A ==>> B = ...
     def adjustWithKey(k: A, f: (A, B) => B)(implicit o: Order[A]): A ==>> B = ...
     ...
   }
-~~~~~~~~
-
+```
 
 ### `StrictTree` and `Tree`
 
@@ -7004,17 +7294,19 @@ structure with an unbounded number of branches in every node (unfortunately
 built from standard library collections for legacy reasons):
 
 {lang="text"}
-~~~~~~~~
+
+```
   case class StrictTree[A](
     rootLabel: A,
     subForest: Vector[StrictTree[A]]
   )
-~~~~~~~~
+```
 
 `Tree` is a *by-need* version of `StrictTree` with convenient constructors
 
 {lang="text"}
-~~~~~~~~
+
+```
   class Tree[A](
     rootc: Need[A],
     forestc: Need[Stream[Tree[A]]]
@@ -7030,7 +7322,7 @@ built from standard library collections for legacy reasons):
       def apply[A](root: =>A): Tree[A] = ...
     }
   }
-~~~~~~~~
+```
 
 The user of a Rose Tree is expected to manually balance it, which makes it
 suitable for cases where it is useful to encode domain knowledge of a hierarchy
@@ -7042,14 +7334,14 @@ Rose Tree.
 When working with hierarchical data, consider using a Rose Tree instead of
 rolling a custom data structure.
 
-
 ### `FingerTree`
 
 Finger trees are generalised sequences with amortised constant cost lookup and
 logarithmic concatenation. `A` is the type of data, ignore `V` for now:
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed abstract class FingerTree[V, A] {
     def +:(a: A): FingerTree[V, A] = ...
     def :+(a: =>A): FingerTree[V, A] = ...
@@ -7065,19 +7357,19 @@ logarithmic concatenation. `A` is the type of data, ignore `V` for now:
       spine: =>FingerTree[V, Node[V, A]],
       right: Finger[V, A]
     ) extends FingerTree[V, A]
-  
+
     sealed abstract class Finger[V, A]
     final case class One[V, A](v: V, a1: A) extends Finger[V, A]
     final case class Two[V, A](v: V, a1: A, a2: A) extends Finger[V, A]
     final case class Three[V, A](v: V, a1: A, a2: A, a3: A) extends Finger[V, A]
     final case class Four[V, A](v: V, a1: A, a2: A, a3: A, a4: A) extends Finger[V, A]
-  
+
     sealed abstract class Node[V, A]
     private class Node2[V, A](v: V, a1: =>A, a2: =>A) extends Node[V, A]
     private class Node3[V, A](v: V, a1: =>A, a2: =>A, a3: =>A) extends Node[V, A]
     ...
   }
-~~~~~~~~
+```
 
 A> `<++>` is the TIE Bomber. Admittedly, sending in the proton torpedoes is a bit
 A> of an overreaction: it is the same thing as the regular `Monoid` TIE Fighter
@@ -7110,28 +7402,29 @@ A> of `FingerTree` is almost a decade old and is due a rewrite.
 added to an `M`
 
 {lang="text"}
-~~~~~~~~
+
+```
   class Reducer[C, M: Monoid] {
     def unit(c: C): M
-  
+
     def snoc(m: M, c: C): M = append(m, unit(c))
     def cons(c: C, m: M): M = append(unit(c), m)
   }
-~~~~~~~~
+```
 
 For example, `Reducer[A, IList[A]]` can provide an efficient `.cons`
 
 {lang="text"}
-~~~~~~~~
+
+```
   implicit def reducer[A]: Reducer[A, IList[A]] = new Reducer[A, IList[A]] {
     override def unit(a: A): IList[A] = IList.single(a)
     override def cons(a: A, as: IList[A]): IList[A] = a :: as
   }
-~~~~~~~~
+```
 
 A> `Reducer` should have been called `CanActuallyBuildFrom`, in honour of the
 A> similarly named stdlib `class`, since it is effectively a collection builder.
-
 
 #### `IndSeq`
 
@@ -7140,22 +7433,23 @@ If we use `Int` as `V`, we can get an indexed sequence, where the measure is
 with the size at each branch in the structure:
 
 {lang="text"}
-~~~~~~~~
+
+```
   final class IndSeq[A](val self: FingerTree[Int, A])
   object IndSeq {
     private implicit def sizer[A]: Reducer[A, Int] = _ => 1
     def apply[A](as: A*): IndSeq[A] = ...
   }
-~~~~~~~~
+```
 
 Another use of `FingerTree` is as an ordered sequence, where the measure stores
 the largest value contained by each branch:
 
-
 #### `OrdSeq`
 
 {lang="text"}
-~~~~~~~~
+
+```
   final class OrdSeq[A: Order](val self: FingerTree[LastOption[A], A]) {
     def partition(a: A): (OrdSeq[A], OrdSeq[A]) = ...
     def insert(a: A): OrdSeq[A] = ...
@@ -7165,12 +7459,11 @@ the largest value contained by each branch:
     private implicit def keyer[A]: Reducer[A, LastOption[A]] = a => Tag(Some(a))
     def apply[A: Order](as: A*): OrdSeq[A] = ...
   }
-~~~~~~~~
+```
 
 `OrdSeq` has no typeclass instances so it is only useful for incrementally
 building up an ordered sequence, with duplicates. We can access the underlying
 `FingerTree` when needed.
-
 
 #### `Cord`
 
@@ -7180,7 +7473,8 @@ faster than the default `case class` implementation of nested `.toString`, which
 builds a `String` for every layer in the ADT.
 
 {lang="text"}
-~~~~~~~~
+
+```
   final case class Cord(self: FingerTree[Int, String]) {
     override def toString: String = {
       val sb = new java.lang.StringBuilder(self.measure)
@@ -7189,32 +7483,33 @@ builds a `String` for every layer in the ADT.
     }
     ...
   }
-~~~~~~~~
+```
 
 For example, the `Cord[String]` instance returns a `Three` with the string in
 the middle and quotes on either side
 
 {lang="text"}
-~~~~~~~~
+
+```
   implicit val show: Show[String] = s => Cord(FingerTree.Three("\"", s, "\""))
-~~~~~~~~
+```
 
 Therefore a `String` renders as it is written in source code
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> val s = "foo"
          s.toString
   res: String = foo
-  
+
   scala> s.show
   res: Cord = "foo"
-~~~~~~~~
+```
 
 A> The `Cord` in Scalaz 7.2 is unfortunately not as efficient as it could be. This
 A> has been fixed in Scalaz 7.3 by a [custom data structure optimised for `String`
 A> concatenation](https://github.com/scalaz/scalaz/pull/1793).
-
 
 ### `Heap` Priority Queue
 
@@ -7224,13 +7519,14 @@ priority). The structure is not required to store the non-minimal elements in
 order. A naive implementation of a priority queue could be
 
 {lang="text"}
-~~~~~~~~
+
+```
   final case class Vip[A] private (val peek: Maybe[A], xs: IList[A]) {
     def push(a: A)(implicit O: Order[A]): Vip[A] = peek match {
       case Maybe.Just(min) if a < min => Vip(a.just, min :: xs)
       case _                          => Vip(peek, a :: xs)
     }
-  
+
     def pop(implicit O: Order[A]): Maybe[(A, Vip[A])] = peek strengthR reorder
     private def reorder(implicit O: Order[A]): Vip[A] = xs.sorted match {
       case INil()           => Vip(Maybe.empty, IList.empty)
@@ -7240,7 +7536,7 @@ order. A naive implementation of a priority queue could be
   object Vip {
     def fromList[A: Order](xs: IList[A]): Vip[A] = Vip(Maybe.empty, xs).reorder
   }
-~~~~~~~~
+```
 
 This `push` is a very fast `O(1)`, but `reorder` (and therefore `pop`) relies on
 `IList.sorted` costing `O(n log n)`.
@@ -7250,33 +7546,34 @@ value less than its children. `Heap` has fast push (`insert`), `union`, `size`,
 pop (`uncons`) and peek (`minimumO`) operations:
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed abstract class Heap[A] {
     def insert(a: A)(implicit O: Order[A]): Heap[A] = ...
     def +(a: A)(implicit O: Order[A]): Heap[A] = insert(a)
-  
+
     def union(as: Heap[A])(implicit O: Order[A]): Heap[A] = ...
-  
+
     def uncons(implicit O: Order[A]): Option[(A, Heap[A])] = minimumO strengthR deleteMin
     def minimumO: Option[A] = ...
     def deleteMin(implicit O: Order[A]): Heap[A] = ...
-  
+
     ...
   }
   object Heap {
     def fromData[F[_]: Foldable, A: Order](as: F[A]): Heap[A] = ...
-  
+
     private final case class Ranked[A](rank: Int, value: A)
-  
+
     private final case class Empty[A]() extends Heap[A]
     private final case class NonEmpty[A](
       size: Int,
       tree: Tree[Ranked[A]]
     ) extends Heap[A]
-  
+
     ...
   }
-~~~~~~~~
+```
 
 A> `size` is memoized in the ADT to enable instant calculation of
 A> `Foldable.length`, at a cost of 64 bits per entry. A variant of `Heap` could be
@@ -7289,32 +7586,35 @@ the minimum value in the data structure is that `minimumO` (also known as
 *peek*) is a free lookup:
 
 {lang="text"}
-~~~~~~~~
+
+```
   def minimumO: Option[A] = this match {
     case Empty()                        => None
     case NonEmpty(_, Tree.Node(min, _)) => Some(min.value)
   }
-~~~~~~~~
+```
 
 When inserting a new entry, we compare to the current minimum and replace if the
 new entry is lower:
 
 {lang="text"}
-~~~~~~~~
+
+```
   def insert(a: A)(implicit O: Order[A]): Heap[A] = this match {
     case Empty() =>
       NonEmpty(1, Tree.Leaf(Ranked(0, a)))
     case NonEmpty(size, tree @ Tree.Node(min, _)) if a <= min.value =>
       NonEmpty(size + 1, Tree.Node(Ranked(0, a), Stream(tree)))
   ...
-~~~~~~~~
+```
 
 Insertions of non-minimal values result in an *unordered* structure in the
 branches of the minimum. When we encounter two or more subtrees of equal rank,
 we optimistically put the minimum to the front:
 
 {lang="text"}
-~~~~~~~~
+
+```
   ...
     case NonEmpty(size, Tree.Node(min,
            (t1 @ Tree.Node(Ranked(r1, x1), xs1)) #::
@@ -7327,14 +7627,14 @@ we optimistically put the minimum to the front:
           Tree.Node(Ranked(r2 + 1, x2), t0 #:: t1 #:: xs2)
         else
           Tree.Node(Ranked(r1 + 1, a), t1 #:: t2 #:: Stream())
-  
+
       NonEmpty(size + 1, Tree.Node(Ranked(0, min.value), sub #:: ts))
-  
+
     case NonEmpty(size,  Tree.Node(min, rest)) =>
       val t0 = Tree.Leaf(Ranked(0, a))
       NonEmpty(size + 1, Tree.Node(Ranked(0, min.value), t0 #:: rest))
   }
-~~~~~~~~
+```
 
 Avoiding a full ordering of the tree makes `insert` very fast, `O(1)`, such that
 producers adding to the queue are not penalised. However, the consumer pays the
@@ -7348,7 +7648,6 @@ If the `Order[Foo]` does not correctly capture the priority we want for the
 `Heap[Foo]`, we can use `Tag` and provide a custom `Order[Foo @@ Custom]` for a
 `Heap[Foo @@ Custom]`.
 
-
 ### `Diev` (Discrete Intervals)
 
 We can efficiently encode the (unordered) integer values 6, 9, 2, 13, 8, 14, 10,
@@ -7357,16 +7656,17 @@ encoding of *intervals* for elements `A` that have an `Enum[A]`, getting more
 efficient as the contents become denser.
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed abstract class Diev[A] {
     def +(interval: (A, A)): Diev[A]
     def +(value: A): Diev[A]
     def ++(other: Diev[A]): Diev[A]
-  
+
     def -(interval: (A, A)): Diev[A]
     def -(value: A): Diev[A]
     def --(other: Diev[A]): Diev[A]
-  
+
     def intervals: Vector[(A, A)]
     def contains(value: A): Boolean
     def contains(interval: (A, A)): Boolean
@@ -7376,43 +7676,44 @@ efficient as the contents become denser.
     private final case class DieVector[A: Enum](
       intervals: Vector[(A, A)]
     ) extends Diev[A]
-  
+
     def empty[A: Enum]: Diev[A] = ...
     def fromValuesSeq[A: Enum](values: Seq[A]): Diev[A] = ...
     def fromIntervalsSeq[A: Enum](intervals: Seq[(A, A)]): Diev[A] = ...
   }
-~~~~~~~~
+```
 
 When updating the `Diev`, adjacent intervals are merged (and then ordered) such
 that there is a unique representation for a given set of values.
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> Diev.fromValuesSeq(List(6, 9, 2, 13, 8, 14, 10, 7, 5))
   res: Diev[Int] = ((2,2)(5,10)(13,14))
-  
+
   scala> Diev.fromValuesSeq(List(6, 9, 2, 13, 8, 14, 10, 7, 5).reverse)
   res: Diev[Int] = ((2,2)(5,10)(13,14))
-~~~~~~~~
+```
 
 A great usecase for `Diev` is for storing time periods. For example, in our
 `TradeTemplate` from the previous chapter
 
 {lang="text"}
-~~~~~~~~
+
+```
   final case class TradeTemplate(
     payments: List[java.time.LocalDate],
     ccy: Option[Currency],
     otc: Option[Boolean]
   )
-~~~~~~~~
+```
 
 if we find that the `payments` are very dense, we may wish to swap to a `Diev`
 representation for performance reasons, without any change in our business logic
 because we used `Monoid`, not any `List` specific methods. We would, however,
 have to provide an `Enum[LocalDate]`, which is an otherwise useful thing to
 have.
-
 
 ### `OneAnd`
 
@@ -7422,16 +7723,16 @@ Recall that `Foldable` is the Scalaz equivalent of a collections API and
 wraps any other collection to turn it into a `Foldable1`:
 
 {lang="text"}
-~~~~~~~~
+
+```
   final case class OneAnd[F[_], A](head: A, tail: F[A])
-~~~~~~~~
+```
 
 `NonEmptyList[A]` could be an alias to `OneAnd[IList, A]`. Similarly, we can
 create non-empty `Stream`, `DList` and `Tree` structures. However it may break
 ordering and uniqueness characteristics of the underlying structure: a
 `OneAnd[ISet, A]` is not a non-empty `ISet`, it is an `ISet` with a guaranteed
 first element that may also be in the `ISet`.
-
 
 ## Summary
 
@@ -7445,7 +7746,6 @@ publications appear regularly with new approaches to old problems. Implementing
 a functional data structure from the literature is a good contribution to the
 Scalaz ecosystem.
 
-
 # Advanced Monads
 
 You have to know things like Advanced Monads in order to be an advanced
@@ -7457,7 +7757,6 @@ complicated and nuanced than any `Monad` in this chapter.
 
 In this chapter we will study some of the most important implementations of
 `Monad`.
-
 
 ## Always in motion is the `Future`
 
@@ -7484,7 +7783,6 @@ the same time.
 A> If `Future` was a Star Wars character, it would be Anakin Skywalker: the fallen
 A> chosen one, rushing in and breaking things without thinking.
 
-
 ## Effects and Side Effects
 
 If we cannot call side-effecting methods in our business logic, or in `Future`
@@ -7498,30 +7796,32 @@ The simplest implementation of such a `Monad` is `IO`, formalising the version
 we wrote in the introduction:
 
 {lang="text"}
-~~~~~~~~
+
+```
   final class IO[A](val interpret: () => A)
   object IO {
     def apply[A](a: =>A): IO[A] = new IO(() => a)
-  
+
     implicit val monad: Monad[IO] = new Monad[IO] {
       def point[A](a: =>A): IO[A] = IO(a)
       def bind[A, B](fa: IO[A])(f: A => IO[B]): IO[B] = IO(f(fa.interpret()).interpret())
     }
   }
-~~~~~~~~
+```
 
 The `.interpret` method is only called once, in the entrypoint of an
 application:
 
 {lang="text"}
-~~~~~~~~
+
+```
   def main(args: Array[String]): Unit = program.interpret()
-~~~~~~~~
+```
 
 However, there are two big problems with this simple `IO`:
 
-1.  it can stack overflow
-2.  it doesn't support parallel computations
+1. it can stack overflow
+2. it doesn't support parallel computations
 
 Both of these problems will be overcome in this chapter. However, no matter how
 complicated the internal implementation of a `Monad`, the principles described
@@ -7532,7 +7832,6 @@ reason about them, and reuse more code.
 A> The Scala compiler will happily allow us to call side-effecting methods from
 A> unsafe code blocks. The [Scalafix](https://scalacenter.github.io/scalafix/) linting tool can ban side-effecting methods at
 A> compiletime, unless called from inside a deferred `Monad` like `IO`.
-
 
 ## Stack Safety
 
@@ -7549,10 +7848,11 @@ and see if it survives for longer than a few seconds. We can use `.forever`,
 from `Apply` (a parent of `Monad`):
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> val hello = IO { println("hello") }
   scala> Apply[IO].forever(hello).interpret()
-  
+
   hello
   hello
   hello
@@ -7564,19 +7864,20 @@ from `Apply` (a parent of `Monad`):
       at monadio.IO$$anon$1.$anonfun$bind$1(monadio.scala:18)
       at monadio.IO$$anon$1.$anonfun$bind$1(monadio.scala:18)
       at ...
-~~~~~~~~
+```
 
 Scalaz has a typeclass that `Monad` instances can implement if they are stack
 safe: `BindRec` requires a constant stack space for recursive `bind`:
 
 {lang="text"}
-~~~~~~~~
+
+```
   @typeclass trait BindRec[F[_]] extends Bind[F] {
     def tailrecM[A, B](f: A => F[A \/ B])(a: A): F[B]
-  
+
     override def forever[A, B](fa: F[A]): F[B] = ...
   }
-~~~~~~~~
+```
 
 We don't need `BindRec` for all programs, but it is essential for a general
 purpose `Monad` implementation.
@@ -7585,7 +7886,8 @@ The way to achieve stack safety is to convert method calls into references to an
 ADT, the `Free` monad:
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed abstract class Free[S[_], A]
   object Free {
     private final case class Return[S[_], A](a: A)     extends Free[S, A]
@@ -7596,15 +7898,15 @@ ADT, the `Free` monad:
     ) extends Free[S, B] { type A = A0 }
     ...
   }
-~~~~~~~~
+```
 
 A> `SUSPEND`, `RETURN` and `GOSUB` are a tip of the hat to the `BASIC` commands of
 A> the same name: pausing, completing, and continuing a subroutine, respectively.
 
 The `Free` ADT is a natural data type representation of the `Monad` interface:
 
-1.  `Return` represents `.point`
-2.  `Gosub` represents `.bind` / `.flatMap`
+1. `Return` represents `.point`
+2. `Gosub` represents `.bind` / `.flatMap`
 
 When an ADT mirrors the arguments of related functions, it is called a *Church
 encoding*.
@@ -7614,7 +7916,6 @@ example, we could set `S` to be the `Drone` or `Machines` algebras from Chapter
 3 and generate a data structure representation of our program. We will return to
 why this is useful at the end of this chapter.
 
-
 ### `Trampoline`
 
 `Free` is more general than we need for now. Setting the algebra `S[_]` to `()
@@ -7622,7 +7923,8 @@ why this is useful at the end of this chapter.
 a stack safe `Monad`
 
 {lang="text"}
-~~~~~~~~
+
+```
   object Free {
     type Trampoline[A] = Free[() => ?, A]
     implicit val trampoline: Monad[Trampoline] with BindRec[Trampoline] =
@@ -7630,7 +7932,7 @@ a stack safe `Monad`
         def point[A](a: =>A): Trampoline[A] = Return(a)
         def bind[A, B](fa: Trampoline[A])(f: A => Trampoline[B]): Trampoline[B] =
           Gosub(fa, f)
-  
+
         def tailrecM[A, B](f: A => Trampoline[A \/ B])(a: A): Trampoline[B] =
           bind(f(a)) {
             case -\/(a) => tailrecM(f)(a)
@@ -7639,7 +7941,7 @@ a stack safe `Monad`
       }
     ...
   }
-~~~~~~~~
+```
 
 The `BindRec` implementation, `.tailrecM`, runs `.bind` until we get a `B`.
 Although this is not technically a `@tailrec` implementation, it uses constant
@@ -7656,15 +7958,16 @@ by-name (`.delay`). We can also create a `Trampoline` from a by-name
 `Trampoline` (`.suspend`):
 
 {lang="text"}
-~~~~~~~~
+
+```
   object Trampoline {
     def done[A](a: A): Trampoline[A]                  = Return(a)
     def delay[A](a: =>A): Trampoline[A]               = suspend(done(a))
     def suspend[A](a: =>Trampoline[A]): Trampoline[A] = unit >> a
-  
+
     private val unit: Trampoline[Unit] = Suspend(() => done(()))
   }
-~~~~~~~~
+```
 
 When we see `Trampoline[A]` in a codebase we can always mentally substitute it
 with `A`, because it is simply adding stack safety to the pure computation. We
@@ -7705,49 +8008,50 @@ A> The case that is most likely to cause confusion is when we have nested `Gosub
 A> apply the inner function `g` then pass it to the outer one `f`, it is just
 A> function composition.
 
-
 ### Example: Stack Safe `DList`
 
 In the previous chapter we described the data type `DList` as
 
 {lang="text"}
-~~~~~~~~
+
+```
   final case class DList[A](f: IList[A] => IList[A]) {
     def toIList: IList[A] = f(IList.empty)
     def ++(as: DList[A]): DList[A] = DList(xs => f(as.f(xs)))
     ...
   }
-~~~~~~~~
+```
 
 However, the actual implementation looks more like:
 
 {lang="text"}
-~~~~~~~~
+
+```
   final case class DList[A](f: IList[A] => Trampoline[IList[A]]) {
     def toIList: IList[A] = f(IList.empty).run
     def ++(as: =>DList[A]): DList[A] = DList(xs => suspend(as.f(xs) >>= f))
     ...
   }
-~~~~~~~~
+```
 
 Instead of applying nested calls to `f` we use a suspended `Trampoline`. We
 interpret the trampoline with `.run` only when needed, e.g. in `toIList`. The
 changes are minimal, but we now have a stack safe `DList` that can rearrange the
 concatenation of a large number lists without blowing the stack!
 
-
 ### Stack Safe `IO`
 
 Similarly, our `IO` can be made stack safe thanks to `Trampoline`:
 
 {lang="text"}
-~~~~~~~~
+
+```
   final class IO[A](val tramp: Trampoline[A]) {
     def unsafePerformIO(): A = tramp.run
   }
   object IO {
     def apply[A](a: =>A): IO[A] = new IO(Trampoline.delay(a))
-  
+
     implicit val Monad: Monad[IO] with BindRec[IO] =
       new Monad[IO] with BindRec[IO] {
         def point[A](a: =>A): IO[A] = IO(a)
@@ -7756,7 +8060,7 @@ Similarly, our `IO` can be made stack safe thanks to `Trampoline`:
         def tailrecM[A, B](f: A => IO[A \/ B])(a: A): IO[B] = ...
       }
   }
-~~~~~~~~
+```
 
 A> We heard you like `Monad`, so we made you a `Monad` out of a `Monad`, so you can
 A> monadically bind when you are monadically binding.
@@ -7767,16 +8071,17 @@ discourage using it except in the entrypoint of the application.
 This time, we don't get a stack overflow error:
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> val hello = IO { println("hello") }
   scala> Apply[IO].forever(hello).unsafePerformIO()
-  
+
   hello
   hello
   hello
   ...
   hello
-~~~~~~~~
+```
 
 Using a `Trampoline` typically introduces a performance regression vs a regular
 reference. It is `Free` in the sense of *freely generated*, not *free as in
@@ -7786,7 +8091,6 @@ A> Always benchmark instead of accepting sweeping statements about performance: 
 A> may well be the case that the garbage collector performs better for an
 A> application when using `Free` because of the reduced size of retained objects in
 A> the stack.
-
 
 ## Monad Transformer Library
 
@@ -7803,7 +8107,7 @@ This subset of data types and extensions to `Monad` are often referred to as the
 explain each of the transformers, why they are useful, and how they work.
 
 | Effect               | Underlying            | Transformer | Typeclass     |
-|-------------------- |--------------------- |----------- |------------- |
+| -------------------- | --------------------- | ----------- | ------------- |
 | optionality          | `F[Maybe[A]]`         | `MaybeT`    | `MonadPlus`   |
 | errors               | `F[E \/ A]`           | `EitherT`   | `MonadError`  |
 | a runtime value      | `A => F[B]`           | `ReaderT`   | `MonadReader` |
@@ -7812,22 +8116,22 @@ explain each of the transformers, why they are useful, and how they work.
 | keep calm & carry on | `F[E \&/ A]`          | `TheseT`    |               |
 | control flow         | `(A => F[B]) => F[B]` | `ContT`     |               |
 
-
 ### `MonadTrans`
 
 Each transformer has the general shape `T[F[_], A]`, providing at least an
 instance of `Monad` and `Hoist` (and therefore `MonadTrans`):
 
 {lang="text"}
-~~~~~~~~
+
+```
   @typeclass trait MonadTrans[T[_[_], _]] {
     def liftM[F[_]: Monad, A](a: F[A]): T[F, A]
   }
-  
+
   @typeclass trait Hoist[F[_[_], _]] extends MonadTrans[F] {
     def hoist[M[_]: Monad, N[_]](f: M ~> N): F[M, ?] ~> F[N, ?]
   }
-~~~~~~~~
+```
 
 A> `T[_[_], _]` is another example of a higher kinded type. It says that `T` takes
 A> two type parameters: the first also takes a type parameter, written `_[_]`, and
@@ -7841,14 +8145,13 @@ we can create an `OptionT[IO, String]` by calling `.liftM[OptionT]` on an
 
 Generally, there are three ways to create a monad transformer:
 
--   from the underlying, using the transformer's constructor
--   from a single value `A`, using `.pure` from the `Monad` syntax
--   from an `F[A]`, using `.liftM` from the `MonadTrans` syntax
+- from the underlying, using the transformer's constructor
+- from a single value `A`, using `.pure` from the `Monad` syntax
+- from an `F[A]`, using `.liftM` from the `MonadTrans` syntax
 
 Due to the way that type inference works in Scala, this often means that a
 complex type parameter must be explicitly written. As a workaround, transformers
 provide convenient constructors on their companion that are easier to use.
-
 
 ### `MaybeT`
 
@@ -7857,7 +8160,8 @@ optionality through `Option`, `Maybe` and `LazyOption`, respectively. We will
 focus on `MaybeT` to avoid repetition.
 
 {lang="text"}
-~~~~~~~~
+
+```
   final case class MaybeT[F[_], A](run: F[Maybe[A]])
   object MaybeT {
     def just[F[_]: Applicative, A](v: =>A): MaybeT[F, A] =
@@ -7866,21 +8170,22 @@ focus on `MaybeT` to avoid repetition.
       MaybeT(Maybe.empty.pure[F])
     ...
   }
-~~~~~~~~
+```
 
 providing a `MonadPlus`
 
 {lang="text"}
-~~~~~~~~
+
+```
   implicit def monad[F[_]: Monad] = new MonadPlus[MaybeT[F, ?]] {
     def point[A](a: =>A): MaybeT[F, A] = MaybeT.just(a)
     def bind[A, B](fa: MaybeT[F, A])(f: A => MaybeT[F, B]): MaybeT[F, B] =
       MaybeT(fa.run >>= (_.cata(f(_).run, Maybe.empty.pure[F])))
-  
+
     def empty[A]: MaybeT[F, A] = MaybeT.empty
     def plus[A](a: MaybeT[F, A], b: =>MaybeT[F, A]): MaybeT[F, A] = a orElse b
   }
-~~~~~~~~
+```
 
 This monad looks fiddly, but it is just delegating everything to the `Monad[F]`
 and then re-wrapping with a `MaybeT`. It is plumbing.
@@ -7893,35 +8198,38 @@ number of stars a user has, and we start with a `String` that may or may not
 correspond to a user. We have this algebra:
 
 {lang="text"}
-~~~~~~~~
+
+```
   trait Twitter[F[_]] {
     def getUser(name: String): F[Maybe[User]]
     def getStars(user: User): F[Int]
   }
   def T[F[_]](implicit t: Twitter[F]): Twitter[F] = t
-~~~~~~~~
+```
 
 We need to call `getUser` followed by `getStars`. If we use `Monad` as our
 context, our function is difficult because we have to handle the `Empty` case:
 
 {lang="text"}
-~~~~~~~~
+
+```
   def stars[F[_]: Monad: Twitter](name: String): F[Maybe[Int]] = for {
     maybeUser  <- T.getUser(name)
     maybeStars <- maybeUser.traverse(T.getStars)
   } yield maybeStars
-~~~~~~~~
+```
 
 However, if we have a `MonadPlus` as our context, we can suck `Maybe` into the
 `F[_]` with `.orEmpty`, and forget about it:
 
 {lang="text"}
-~~~~~~~~
+
+```
   def stars[F[_]: MonadPlus: Twitter](name: String): F[Int] = for {
     user  <- T.getUser(name) >>= (_.orEmpty[F])
     stars <- T.getStars(user)
   } yield stars
-~~~~~~~~
+```
 
 However adding a `MonadPlus` requirement can cause problems downstream if the
 context does not have one. The solution is to either change the context of the
@@ -7929,17 +8237,17 @@ program to `MaybeT[F, ?]` (lifting the `Monad[F]` into a `MonadPlus`), or to
 explicitly use `MaybeT` in the return type, at the cost of slightly more code:
 
 {lang="text"}
-~~~~~~~~
+
+```
   def stars[F[_]: Monad: Twitter](name: String): MaybeT[F, Int] = for {
     user  <- MaybeT(T.getUser(name))
     stars <- T.getStars(user).liftM[MaybeT]
   } yield stars
-~~~~~~~~
+```
 
 The decision to require a more powerful `Monad` vs returning a transformer is
 something that each team can decide for themselves based on the interpreters
 that they plan on using for their program.
-
 
 ### `EitherT`
 
@@ -7951,7 +8259,8 @@ contextual information about what went wrong.
 `EitherT` is a wrapper around an `F[A \/ B]`
 
 {lang="text"}
-~~~~~~~~
+
+```
   final case class EitherT[F[_], A, B](run: F[A \/ B])
   object EitherT {
     def either[F[_]: Applicative, A, B](d: A \/ B): EitherT[F, A, B] = ...
@@ -7961,17 +8270,18 @@ contextual information about what went wrong.
     def pure[F[_]: Applicative, A, B](b: B): EitherT[F, A, B] = ...
     ...
   }
-~~~~~~~~
+```
 
 The `Monad` is a `MonadError`
 
 {lang="text"}
-~~~~~~~~
+
+```
   @typeclass trait MonadError[F[_], E] extends Monad[F] {
     def raiseError[A](e: E): F[A]
     def handleError[A](fa: F[A])(f: E => F[A]): F[A]
   }
-~~~~~~~~
+```
 
 `.raiseError` and `.handleError` are self-descriptive: the equivalent of `throw`
 and `catch` an exception, respectively.
@@ -7979,13 +8289,14 @@ and `catch` an exception, respectively.
 `MonadError` has some addition syntax for dealing with common problems:
 
 {lang="text"}
-~~~~~~~~
+
+```
   implicit final class MonadErrorOps[F[_], E, A](self: F[A])(implicit val F: MonadError[F, E]) {
     def attempt: F[E \/ A] = ...
     def recover(f: E => A): F[A] = ...
     def emap[B](f: A => E \/ B): F[B] = ...
   }
-~~~~~~~~
+```
 
 `.attempt` brings errors into the value, which is useful for exposing errors in
 subsystems as first class values.
@@ -7998,14 +8309,15 @@ subsystems as first class values.
 The `MonadError` for `EitherT` is:
 
 {lang="text"}
-~~~~~~~~
+
+```
   implicit def monad[F[_]: Monad, E] = new MonadError[EitherT[F, E, ?], E] {
     def monad[F[_]: Monad, E] = new MonadError[EitherT[F, E, ?], E] {
     def bind[A, B](fa: EitherT[F, E, A])
                   (f: A => EitherT[F, E, B]): EitherT[F, E, B] =
       EitherT(fa.run >>= (_.fold(_.left[B].pure[F], b => f(b).run)))
     def point[A](a: =>A): EitherT[F, E, A] = EitherT.pure(a)
-  
+
     def raiseError[A](e: E): EitherT[F, E, A] = EitherT.pureLeft(e)
     def handleError[A](fa: EitherT[F, E, A])
                       (f: E => EitherT[F, E, A]): EitherT[F, E, A] =
@@ -8014,30 +8326,32 @@ The `MonadError` for `EitherT` is:
         case right => right.pure[F]
       })
   }
-~~~~~~~~
+```
 
 It should be of no surprise that we can rewrite the `MonadPlus` example with
 `MonadError`, inserting informative error messages:
 
 {lang="text"}
-~~~~~~~~
+
+```
   def stars[F[_]: Twitter](name: String)
                           (implicit F: MonadError[F, String]): F[Int] = for {
     user  <- T.getUser(name) >>= (_.orError(s"user '$name' not found")(F))
     stars <- T.getStars(user)
   } yield stars
-~~~~~~~~
+```
 
 where `.orError` is a convenience method on `Maybe`
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed abstract class Maybe[A] {
     ...
     def orError[F[_], E](e: E)(implicit F: MonadError[F, E]): F[A] =
       cata(F.point(_), F.raiseError(e))
   }
-~~~~~~~~
+```
 
 A> It is common to use `implicit` parameter blocks instead of context bounds when
 A> the signature of the typeclass has more than one parameter.
@@ -8048,46 +8362,49 @@ A> type, in this case `F`.
 The version using `EitherT` directly looks like
 
 {lang="text"}
-~~~~~~~~
+
+```
   def stars[F[_]: Monad: Twitter](name: String): EitherT[F, String, Int] = for {
     user <- EitherT(T.getUser(name).map(_ \/> s"user '$name' not found"))
     stars <- EitherT.rightT(T.getStars(user))
   } yield stars
-~~~~~~~~
+```
 
 The simplest instance of `MonadError` is for `\/`, perfect for testing business
 logic that requires a `MonadError`. For example,
 
 {lang="text"}
-~~~~~~~~
+
+```
   final class MockTwitter extends Twitter[String \/ ?] {
     def getUser(name: String): String \/ Maybe[User] =
       if (name.contains(" ")) Maybe.empty.right
       else if (name === "wobble") "connection error".left
       else User(name).just.right
-  
+
     def getStars(user: User): String \/ Int =
       if (user.name.startsWith("w")) 10.right
       else "stars have been replaced by hearts".left
   }
-~~~~~~~~
+```
 
 Our unit tests for `.stars` might cover these cases:
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> stars("wibble")
   \/-(10)
-  
+
   scala> stars("wobble")
   -\/(connection error)
-  
+
   scala> stars("i'm a fish")
   -\/(user 'i'm a fish' not found)
-  
+
   scala> stars("fommil")
   -\/(stars have been replaced by hearts)
-~~~~~~~~
+```
 
 As we've now seen several times, we can focus on testing the pure business logic
 without distraction.
@@ -8095,7 +8412,8 @@ without distraction.
 Finally, if we return to our `JsonClient` algebra from Chapter 4.3
 
 {lang="text"}
-~~~~~~~~
+
+```
   trait JsonClient[F[_]] {
     def get[A: JsDecoder](
       uri: String Refined Url,
@@ -8103,7 +8421,7 @@ Finally, if we return to our `JsonClient` algebra from Chapter 4.3
     ): F[A]
     ...
   }
-~~~~~~~~
+```
 
 recall that we only coded the happy path into the API. If our interpreter for
 this algebra only works for an `F` having a `MonadError` we get to define the
@@ -8111,17 +8429,17 @@ kinds of errors as a tangential concern. Indeed, we can have **two** layers of
 error if we define the interpreter for a `EitherT[IO, JsonClient.Error, ?]`
 
 {lang="text"}
-~~~~~~~~
+
+```
   object JsonClient {
     sealed abstract class Error
     final case class ServerError(status: Int)       extends Error
     final case class DecodingError(message: String) extends Error
   }
-~~~~~~~~
+```
 
 which cover I/O (network) problems, server status problems, and issues with our
 modelling of the server's JSON payloads.
-
 
 #### Choosing an error type
 
@@ -8135,10 +8453,10 @@ unprincipled gang prefers using `Throwable` for maximum JVM compatibility.
 
 There are two problems with an ADT of errors on the application level:
 
--   it is very awkward to create a new error. One file becomes a monolithic
-    repository of errors, aggregating the ADTs of individual subsystems.
--   no matter how granular the errors are, the resolution is often the same: log
-    it and try it again, or give up. We don't need an ADT for this.
+- it is very awkward to create a new error. One file becomes a monolithic
+  repository of errors, aggregating the ADTs of individual subsystems.
+- no matter how granular the errors are, the resolution is often the same: log
+  it and try it again, or give up. We don't need an ADT for this.
 
 An error ADT is of value if every entry allows a different kind of recovery to
 be performed.
@@ -8152,7 +8470,8 @@ piece of code was the source of an error. With [`sourcecode` by Li Haoyi](https:
 include contextual information as metadata in our errors:
 
 {lang="text"}
-~~~~~~~~
+
+```
   final case class Meta(fqn: String, file: String, line: Int)
   object Meta {
     implicit def gen(implicit fqn: sourcecode.FullName,
@@ -8160,9 +8479,9 @@ include contextual information as metadata in our errors:
                               line: sourcecode.Line): Meta =
       new Meta(fqn.value, file.value, line.value)
   }
-  
+
   final case class Err(msg: String)(implicit val meta: Meta)
-~~~~~~~~
+```
 
 Although `Err` is referentially transparent, the implicit construction of a
 `Meta` does **not** appear to be referentially transparent from a natural reading:
@@ -8171,30 +8490,31 @@ different values because the location in the source code impacts the returned
 value:
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> println(Err("hello world").meta)
   Meta(com.acme,<console>,10)
-  
+
   scala> println(Err("hello world").meta)
   Meta(com.acme,<console>,11)
-~~~~~~~~
+```
 
 To understand this, we have to appreciate that `sourcecode.*` methods are macros
 that are generating source code for us. If we were to write the above explicitly
 it is clear what is happening:
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> println(Err("hello world")(Meta("com.acme", "<console>", 10)).meta)
   Meta(com.acme,<console>,10)
-  
+
   scala> println(Err("hello world")(Meta("com.acme", "<console>", 11)).meta)
   Meta(com.acme,<console>,11)
-~~~~~~~~
+```
 
 Yes, we've made a deal with the macro devil, but we could also write the `Meta`
 manually and have it go out of date quicker than our documentation.
-
 
 ### `ReaderT`
 
@@ -8207,13 +8527,14 @@ reflection.
 after the mathematician *Heinrich Kleisli*.
 
 {lang="text"}
-~~~~~~~~
+
+```
   type ReaderT[F[_], A, B] = Kleisli[F, A, B]
-  
+
   final case class Kleisli[F[_], A, B](run: A => F[B]) {
     def dimap[C, D](f: C => A, g: B => D)(implicit F: Functor[F]): Kleisli[F, C, D] =
       Kleisli(c => run(f(c)).map(g))
-  
+
     def >=>[C](k: Kleisli[F, B, C])(implicit F: Bind[F]): Kleisli[F, A, C] = ...
     def >==>[C](k: B => F[C])(implicit F: Bind[F]): Kleisli[F, A, C] = this >=> Kleisli(k)
     ...
@@ -8222,7 +8543,7 @@ after the mathematician *Heinrich Kleisli*.
     implicit def kleisliFn[F[_], A, B](k: Kleisli[F, A, B]): A => F[B] = k.run
     ...
   }
-~~~~~~~~
+```
 
 A> Some people call `>=>` the *fish operator*. There's always a bigger fish, hence
 A> `>==>`. They are also called *Kleisli arrows*.
@@ -8242,38 +8563,41 @@ A better solution is for our program to have an algebra that provides the
 configuration when needed, e.g.
 
 {lang="text"}
-~~~~~~~~
+
+```
   trait ConfigReader[F[_]] {
     def token: F[RefreshToken]
   }
-~~~~~~~~
+```
 
 We have reinvented `MonadReader`, the typeclass associated to `ReaderT`, where
 `.ask` is the same as our `.token`, and `S` is `RefreshToken`:
 
 {lang="text"}
-~~~~~~~~
+
+```
   @typeclass trait MonadReader[F[_], S] extends Monad[F] {
     def ask: F[S]
-  
+
     def local[A](f: S => S)(fa: F[A]): F[A]
   }
-~~~~~~~~
+```
 
 with the implementation
 
 {lang="text"}
-~~~~~~~~
+
+```
   implicit def monad[F[_]: Monad, R] = new MonadReader[Kleisli[F, R, ?], R] {
     def point[A](a: =>A): Kleisli[F, R, A] = Kleisli(_ => F.point(a))
     def bind[A, B](fa: Kleisli[F, R, A])(f: A => Kleisli[F, R, B]) =
       Kleisli(a => Monad[F].bind(fa.run(a))(f))
-  
+
     def ask: Kleisli[F, R, R] = Kleisli(_.pure[F])
     def local[A](f: R => R)(fa: Kleisli[F, R, A]): Kleisli[F, R, A] =
       Kleisli(f andThen fa.run)
   }
-~~~~~~~~
+```
 
 A law of `MonadReader` is that the `S` cannot change between invocations, i.e.
 `ask >> ask === ask`. For our usecase, this is to say that the configuration is
@@ -8285,19 +8609,21 @@ In our OAuth 2.0 implementation we could first move the `Monad` evidence onto th
 methods:
 
 {lang="text"}
-~~~~~~~~
+
+```
   def bearer(refresh: RefreshToken)(implicit F: Monad[F]): F[BearerToken] =
     for { ...
-~~~~~~~~
+```
 
 and then refactor the `refresh` parameter to be part of the `Monad`
 
 {lang="text"}
-~~~~~~~~
+
+```
   def bearer(implicit F: MonadReader[F, RefreshToken]): F[BearerToken] =
     for {
       refresh <- F.ask
-~~~~~~~~
+```
 
 Any parameter can be moved into the `MonadReader`. This is of most value to
 immediate callers when they simply want to thread through this information from
@@ -8307,9 +8633,10 @@ the use of typeclasses, reducing the mental burden of using Scala.
 The other method in `MonadReader` is `.local`
 
 {lang="text"}
-~~~~~~~~
+
+```
   def local[A](f: S => S)(fa: F[A]): F[A]
-~~~~~~~~
+```
 
 We can change `S` and run a program `fa` within that local context, returning to
 the original `S`. A use case for `.local` is to generate a "stack trace" that
@@ -8317,17 +8644,19 @@ makes sense to our domain. giving us nested logging! Leaning on the `Meta` data
 structure from the previous section, we define a function to checkpoint:
 
 {lang="text"}
-~~~~~~~~
+
+```
   def traced[A](fa: F[A])(implicit F: MonadReader[F, IList[Meta]]): F[A] =
     F.local(Meta.gen :: _)(fa)
-~~~~~~~~
+```
 
 and we can use it to wrap functions that operate in this context.
 
 {lang="text"}
-~~~~~~~~
+
+```
   def foo: F[Foo] = traced(getBar) >>= barToFoo
-~~~~~~~~
+```
 
 automatically passing through anything that is not explicitly traced. A compiler
 plugin or macro could do the opposite, opting everything in by default.
@@ -8354,11 +8683,12 @@ Finally, if we cannot request a `MonadReader` because our application does not
 provide one, we can always return a `ReaderT`
 
 {lang="text"}
-~~~~~~~~
+
+```
   def bearer(implicit F: Monad[F]): ReaderT[F, RefreshToken, BearerToken] =
     ReaderT( token => for {
     ...
-~~~~~~~~
+```
 
 If a caller receives a `ReaderT`, and they have the `token` parameter to hand,
 they can call `access.run(token)` and get back an `F[BearerToken]`.
@@ -8366,13 +8696,12 @@ they can call `access.run(token)` and get back an `F[BearerToken]`.
 Admittedly, since we don't have many callers, we should just revert to a regular
 function parameter. `MonadReader` is of most use when:
 
-1.  we may wish to refactor the code later to reload config
-2.  the value is not needed by intermediate callers
-3.  or, we want to locally scope some variable
+1. we may wish to refactor the code later to reload config
+2. the value is not needed by intermediate callers
+3. or, we want to locally scope some variable
 
 Dotty can keep its implicit functions... we already have `ReaderT` and
 `MonadReader`.
-
 
 ### `WriterT`
 
@@ -8380,71 +8709,76 @@ The opposite to reading is writing. The `WriterT` monad transformer is typically
 for writing to a journal.
 
 {lang="text"}
-~~~~~~~~
+
+```
   final case class WriterT[F[_], W, A](run: F[(W, A)])
   object WriterT {
     def put[F[_]: Functor, W, A](value: F[A])(w: W): WriterT[F, W, A] = ...
     def putWith[F[_]: Functor, W, A](value: F[A])(w: A => W): WriterT[F, W, A] = ...
     ...
   }
-~~~~~~~~
+```
 
 The wrapped type is `F[(W, A)]` with the journal accumulated in `W`.
 
 There is not just one associated monad, but two! `MonadTell` and `MonadListen`
 
 {lang="text"}
-~~~~~~~~
+
+```
   @typeclass trait MonadTell[F[_], W] extends Monad[F] {
     def writer[A](w: W, v: A): F[A]
     def tell(w: W): F[Unit] = ...
-  
+
     def :++>[A](fa: F[A])(w: =>W): F[A] = ...
     def :++>>[A](fa: F[A])(f: A => W): F[A] = ...
   }
-  
+
   @typeclass trait MonadListen[F[_], W] extends MonadTell[F, W] {
     def listen[A](fa: F[A]): F[(A, W)]
-  
+
     def written[A](fa: F[A]): F[W] = ...
   }
-~~~~~~~~
+```
 
 `MonadTell` is for writing to the journal and `MonadListen` is to recover it.
 The `WriterT` implementation is
 
 {lang="text"}
-~~~~~~~~
+
+```
   implicit def monad[F[_]: Monad, W: Monoid] = new MonadListen[WriterT[F, W, ?], W] {
     def point[A](a: =>A) = WriterT((Monoid[W].zero, a).point)
     def bind[A, B](fa: WriterT[F, W, A])(f: A => WriterT[F, W, B]) = WriterT(
       fa.run >>= { case (wa, a) => f(a).run.map { case (wb, b) => (wa |+| wb, b) } })
-  
+
     def writer[A](w: W, v: A) = WriterT((w -> v).point)
     def listen[A](fa: WriterT[F, W, A]) = WriterT(
       fa.run.map { case (w, a) => (w, (a, w)) })
   }
-~~~~~~~~
+```
 
 The most obvious example is to use `MonadTell` for logging, or audit reporting.
 Reusing `Meta` from our error reporting we could imagine creating a log
 structure like
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed trait Log
   final case class Debug(msg: String)(implicit m: Meta)   extends Log
   final case class Info(msg: String)(implicit m: Meta)    extends Log
   final case class Warning(msg: String)(implicit m: Meta) extends Log
-~~~~~~~~
+```
 
 and use `Dequeue[Log]` as our journal type. We could change our OAuth2
 `authenticate` method to
 
 {lang="text"}
-~~~~~~~~
+
+```
   def debug(msg: String)(implicit m: Meta): Dequeue[Log] = Dequeue(Debug(msg))
-  
+
   def authenticate: F[CodeToken] =
     for {
       callback <- user.start :++> debug("started the webserver")
@@ -8453,7 +8787,7 @@ and use `Dequeue[Log]` as our journal type. We could change our OAuth2
       _        <- user.open(url) :++> debug(s"user visiting $url")
       code     <- user.stop :++> debug("stopped the webserver")
     } yield code
-~~~~~~~~
+```
 
 We could even combine this with the `ReaderT` traces and get structured logs.
 
@@ -8474,7 +8808,8 @@ A popular specialisation of `WriterT` is when the monad is `Id`, meaning the
 underlying `run` value is just a simple tuple `(W, A)`.
 
 {lang="text"}
-~~~~~~~~
+
+```
   type Writer[W, A] = WriterT[Id, W, A]
   object WriterT {
     def writer[W, A](v: (W, A)): Writer[W, A] = WriterT[Id, W, A](v)
@@ -8485,13 +8820,12 @@ underlying `run` value is just a simple tuple `(W, A)`.
     def set[W](w: W): Writer[W, A] = WriterT(w -> self)
     def tell: Writer[A, Unit] = WriterT.tell(self)
   }
-~~~~~~~~
+```
 
 which allows us to let any value carry around a secondary monoidal calculation,
 without needing a context `F[_]`.
 
 In a nutshell, `WriterT` / `MonadTell` is how to multi-task in FP.
-
 
 ### `StateT`
 
@@ -8507,15 +8841,16 @@ is why the underlying type of `StateT` is `S => F[(S, A)]`.
 The associated monad is `MonadState`
 
 {lang="text"}
-~~~~~~~~
+
+```
   @typeclass trait MonadState[F[_], S] extends Monad[F] {
     def put(s: S): F[Unit]
     def get: F[S]
-  
+
     def modify(f: S => S): F[Unit] = get >>= (s => put(f(s)))
     ...
   }
-~~~~~~~~
+```
 
 A> `S` must be an immutable type: `.modify` is not an escape hatch to update a
 A> mutable data structure. Mutability is impure and is only allowed within an `IO`
@@ -8525,11 +8860,12 @@ A> block.
 studied so far. Instead of being a `case class` it is an ADT with two members:
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed abstract class StateT[F[_], S, A]
   object StateT {
     def apply[F[_], S, A](f: S => F[(S, A)]): StateT[F, S, A] = Point(f)
-  
+
     private final case class Point[F[_], S, A](
       run: S => F[(S, A)]
     ) extends StateT[F, S, A]
@@ -8539,13 +8875,14 @@ studied so far. Instead of being a `case class` it is an ADT with two members:
     ) extends StateT[F, S, B]
     ...
   }
-~~~~~~~~
+```
 
 which are a specialised form of `Trampoline`, giving us stack safety when we
 want to recover the underlying data structure, `.run`:
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed abstract class StateT[F[_], S, A] {
     def run(initial: S)(implicit F: Monad[F]): F[(S, A)] = this match {
       case Point(f) => f(initial)
@@ -8556,31 +8893,33 @@ want to recover the underlying data structure, `.run`:
     }
     ...
   }
-~~~~~~~~
+```
 
 `StateT` can straightforwardly implement `MonadState` with its ADT:
 
 {lang="text"}
-~~~~~~~~
+
+```
   implicit def monad[F[_]: Applicative, S] = new MonadState[StateT[F, S, ?], S] {
     def point[A](a: =>A) = Point(s => (s, a).point[F])
     def bind[A, B](fa: StateT[F, S, A])(f: A => StateT[F, S, B]) =
       FlatMap(fa, (_, a: A) => f(a))
-  
+
     def get       = Point(s => (s, s).point[F])
     def put(s: S) = Point(_ => (s, ()).point[F])
   }
-~~~~~~~~
+```
 
 With `.pure` mirrored on the companion as `.stateT`:
 
 {lang="text"}
-~~~~~~~~
+
+```
   object StateT {
     def stateT[F[_]: Applicative, S, A](a: A): StateT[F, S, A] = ...
     ...
   }
-~~~~~~~~
+```
 
 and `MonadTrans.liftM` providing the `F[A] => StateT[F, S, A]` constructor as
 usual.
@@ -8591,18 +8930,19 @@ for interacting with the `State` monad transformer directly, and mirroring
 `MonadState`:
 
 {lang="text"}
-~~~~~~~~
+
+```
   type State[a] = StateT[Id, a]
   object State {
     def apply[S, A](f: S => (S, A)): State[S, A] = StateT[Id, S, A](f)
     def state[S, A](a: A): State[S, A] = State((_, a))
-  
+
     def get[S]: State[S, S] = State(s => (s, s))
     def put[S](s: S): State[S, Unit] = State(_ => (s, ()))
     def modify[S](f: S => S): State[S, Unit] = ...
     ...
   }
-~~~~~~~~
+```
 
 For an example we can return to the business logic tests of
 `drone-dynamic-agents`. Recall from Chapter 3 that we created `Mutable` as test
@@ -8610,22 +8950,24 @@ interpreters for our application and we stored the number of `started` and
 `stoped` nodes in `var`.
 
 {lang="text"}
-~~~~~~~~
+
+```
   class Mutable(state: WorldView) {
     var started, stopped: Int = 0
-  
+
     implicit val drone: Drone[Id] = new Drone[Id] { ... }
     implicit val machines: Machines[Id] = new Machines[Id] { ... }
     val program = new DynAgentsModule[Id]
   }
-~~~~~~~~
+```
 
 We now know that we can write a much better test simulator with `State`. We will
 take the opportunity to upgrade the accuracy of the simulation at the same time.
 Recall that a core domain object is our application's view of the world:
 
 {lang="text"}
-~~~~~~~~
+
+```
   final case class WorldView(
     backlog: Int,
     agents: Int,
@@ -8634,13 +8976,14 @@ Recall that a core domain object is our application's view of the world:
     pending: Map[MachineNode, Epoch],
     time: Epoch
   )
-~~~~~~~~
+```
 
 Since we're writing a simulation of the world for our tests, we can create a
 data type that captures the ground truth of everything
 
 {lang="text"}
-~~~~~~~~
+
+```
   final case class World(
     backlog: Int,
     agents: Int,
@@ -8650,7 +8993,7 @@ data type that captures the ground truth of everything
     stopped: Set[MachineNode],
     time: Epoch
   )
-~~~~~~~~
+```
 
 A> We have not yet rewritten the application to fully make use Scalaz data types
 A> and typeclasses, and we are still relying on stdlib collections. There is no
@@ -8666,63 +9009,66 @@ The interpreters, which are mocking out contacting external Drone and Google
 services, may be implemented like this:
 
 {lang="text"}
-~~~~~~~~
+
+```
   import State.{ get, modify }
   object StateImpl {
     type F[a] = State[World, a]
-  
+
     private val D = new Drone[F] {
       def getBacklog: F[Int] = get.map(_.backlog)
       def getAgents: F[Int]  = get.map(_.agents)
     }
-  
+
     private val M = new Machines[F] {
       def getAlive: F[Map[MachineNode, Epoch]]   = get.map(_.alive)
       def getManaged: F[NonEmptyList[MachineNode]] = get.map(_.managed)
       def getTime: F[Epoch]                      = get.map(_.time)
-  
+
       def start(node: MachineNode): F[Unit] =
         modify(w => w.copy(started = w.started + node))
       def stop(node: MachineNode): F[Unit] =
         modify(w => w.copy(stopped = w.stopped + node))
     }
-  
+
     val program = new DynAgentsModule[F](D, M)
   }
-~~~~~~~~
+```
 
 and we can rewrite our tests to follow a convention where:
 
--   `world1` is the state of the world before running the program
--   `view1` is the application's belief about the world
--   `world2` is the state of the world after running the program
--   `view2` is the application's belief after running the program
+- `world1` is the state of the world before running the program
+- `view1` is the application's belief about the world
+- `world2` is the state of the world after running the program
+- `view2` is the application's belief after running the program
 
 For example,
 
 {lang="text"}
-~~~~~~~~
+
+```
   it should "request agents when needed" in {
     val world1          = World(5, 0, managed, Map(), Set(), Set(), time1)
     val view1           = WorldView(5, 0, managed, Map(), Map(), time1)
-  
+
     val (world2, view2) = StateImpl.program.act(view1).run(world1)
-  
+
     view2.shouldBe(view1.copy(pending = Map(node1 -> time1)))
     world2.stopped.shouldBe(world1.stopped)
     world2.started.shouldBe(Set(node1))
   }
-~~~~~~~~
+```
 
 We would be forgiven for looking back to our business logic loop
 
 {lang="text"}
-~~~~~~~~
+
+```
   state = initial()
   while True:
     state = update(state)
     state = act(state)
-~~~~~~~~
+```
 
 and use `StateT` to manage the `state`. However, our `DynAgents` business logic
 requires only `Applicative` and we would be violating the *Rule of Least Power*
@@ -8730,22 +9076,23 @@ to require the more powerful `MonadState`. It is therefore entirely reasonable
 to handle the state manually by passing it in to `update` and `act`, and let
 whoever calls us use a `StateT` if they wish.
 
-
 ### `IndexedStateT`
 
 The code that we have studied thus far is not how Scalaz implements `StateT`.
 Instead, a type alias points to `IndexedStateT`
 
 {lang="text"}
-~~~~~~~~
+
+```
   type StateT[F[_], S, A] = IndexedStateT[F, S, S, A]
-~~~~~~~~
+```
 
 The implementation of `IndexedStateT` is much as we have studied, with an extra
 type parameter allowing the input state `S1` and output state `S2` to differ:
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed abstract class IndexedStateT[F[_], -S1, S2, A] {
     def run(initial: S1)(implicit F: Bind[F]): F[(S2, A)] = ...
     ...
@@ -8754,7 +9101,7 @@ type parameter allowing the input state `S1` and output state `S2` to differ:
     def apply[F[_], S1, S2, A](
       f: S1 => F[(S2, A)]
     ): IndexedStateT[F, S1, S2, A] = Wrap(f)
-  
+
     private final case class Wrap[F[_], S1, S2, A](
       run: S1 => F[(S2, A)]
     ) extends IndexedStateT[F, S1, S2, A]
@@ -8764,7 +9111,7 @@ type parameter allowing the input state `S1` and output state `S2` to differ:
     ) extends IndexedStateT[F, S1, S3, B]
     ...
   }
-~~~~~~~~
+```
 
 `IndexedStateT` does not have a `MonadState` when `S1 != S2`, although it has a
 `Monad`.
@@ -8775,15 +9122,16 @@ to `String` lookup. This may have a networked implementation and the order of
 calls is essential. Our first attempt at the API may look something like:
 
 {lang="text"}
-~~~~~~~~
+
+```
   trait Cache[F[_]] {
     def read(k: Int): F[Maybe[String]]
-  
+
     def lock: F[Unit]
     def update(k: Int, v: String): F[Unit]
     def commit: F[Unit]
   }
-~~~~~~~~
+```
 
 with runtime errors if `.update` or `.commit` is called without a `.lock`. A
 more complex design may involve multiple traits and a custom DSL that nobody
@@ -8793,51 +9141,55 @@ Instead, we can use `IndexedStateT` to require that the caller is in the correct
 state. First we define our possible states as an ADT
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed abstract class Status
   final case class Ready()                          extends Status
   final case class Locked(on: ISet[Int])            extends Status
   final case class Updated(values: Int ==>> String) extends Status
-~~~~~~~~
+```
 
 and then revisit our algebra
 
 {lang="text"}
-~~~~~~~~
+
+```
   trait Cache[M[_]] {
     type F[in, out, a] = IndexedStateT[M, in, out, a]
-  
+
     def read(k: Int): F[Ready, Ready, Maybe[String]]
     def readLocked(k: Int): F[Locked, Locked, Maybe[String]]
     def readUncommitted(k: Int): F[Updated, Updated, Maybe[String]]
-  
+
     def lock: F[Ready, Locked, Unit]
     def update(k: Int, v: String): F[Locked, Updated, Unit]
     def commit: F[Updated, Ready, Unit]
   }
-~~~~~~~~
+```
 
 which will give a compiletime error if we try to `.update` without a `.lock`
 
 {lang="text"}
-~~~~~~~~
+
+```
   for {
         a1 <- C.read(13)
         _  <- C.update(13, "wibble")
         _  <- C.commit
       } yield a1
-  
+
   [error]  found   : IndexedStateT[M,Locked,Ready,Maybe[String]]
   [error]  required: IndexedStateT[M,Ready,?,?]
   [error]       _  <- C.update(13, "wibble")
   [error]          ^
-~~~~~~~~
+```
 
 but allowing us to construct functions that can be composed by explicitly
 including their state:
 
 {lang="text"}
-~~~~~~~~
+
+```
   def wibbleise[M[_]: Monad](C: Cache[M]): F[Ready, Ready, String] =
     for {
       _  <- C.lock
@@ -8846,7 +9198,7 @@ including their state:
       _  <- C.update(13, a2)
       _  <- C.commit
     } yield a2
-~~~~~~~~
+```
 
 A> We introduced code duplication in our API when we defined multiple `.read`
 A> operations
@@ -8893,7 +9245,6 @@ A>
 A> The choice of which of the three alternative APIs to prefer is left to the
 A> personal taste of the API designer.
 
-
 ### `IndexedReaderWriterStateT`
 
 Those wanting to have a combination of `ReaderT`, `WriterT` and `IndexedStateT`
@@ -8902,7 +9253,8 @@ S1) => F[(W, A, S2)]` with `R` having `Reader` semantics, `W` for monoidic
 writes, and the `S` parameters for indexed state updates.
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed abstract class IndexedReaderWriterStateT[F[_], -R, W, -S1, S2, A] {
     def run(r: R, s: S1)(implicit F: Monad[F]): F[(W, A, S2)] = ...
     ...
@@ -8910,27 +9262,27 @@ writes, and the `S` parameters for indexed state updates.
   object IndexedReaderWriterStateT {
     def apply[F[_], R, W, S1, S2, A](f: (R, S1) => F[(W, A, S2)]) = ...
   }
-  
+
   type ReaderWriterStateT[F[_], -R, W, S, A] = IndexedReaderWriterStateT[F, R, W, S, S, A]
   object ReaderWriterStateT {
     def apply[F[_], R, W, S, A](f: (R, S) => F[(W, A, S)]) = ...
   }
-~~~~~~~~
+```
 
 Abbreviations are provided because otherwise, let's be honest, these types are
 so long they look like they are part of a J2EE API:
 
 {lang="text"}
-~~~~~~~~
+
+```
   type IRWST[F[_], -R, W, -S1, S2, A] = IndexedReaderWriterStateT[F, R, W, S1, S2, A]
   val IRWST = IndexedReaderWriterStateT
   type RWST[F[_], -R, W, S, A] = ReaderWriterStateT[F, R, W, S, A]
   val RWST = ReaderWriterStateT
-~~~~~~~~
+```
 
 `IRWST` is a more efficient implementation than a manually created transformer
 *stack* of `ReaderT[WriterT[IndexedStateT[F, ...], ...], ...]`.
-
 
 ### `TheseT`
 
@@ -8941,13 +9293,14 @@ The underlying data type is `F[A \&/ B]` with `A` being the error type,
 requiring a `Semigroup` to enable the accumulation of errors.
 
 {lang="text"}
-~~~~~~~~
+
+```
   final case class TheseT[F[_], A, B](run: F[A \&/ B])
   object TheseT {
     def `this`[F[_]: Functor, A, B](a: F[A]): TheseT[F, A, B] = ...
     def that[F[_]: Functor, A, B](b: F[B]): TheseT[F, A, B] = ...
     def both[F[_]: Functor, A, B](ab: F[(A, B)]): TheseT[F, A, B] = ...
-  
+
     implicit def monad[F[_]: Monad, A: Semigroup] = new Monad[TheseT[F, A, ?]] {
       def bind[B, C](fa: TheseT[F, A, B])(f: B => TheseT[F, A, C]) =
         TheseT(fa.run >>= {
@@ -8960,11 +9313,11 @@ requiring a `Semigroup` to enable the accumulation of errors.
               case Both(a_, c_) => Both(a |+| a_, c_)
             }
         })
-  
+
       def point[B](b: =>B) = TheseT(b.wrapThat.point[F])
     }
   }
-~~~~~~~~
+```
 
 There is no special monad associated with `TheseT`, it is just a regular
 `Monad`. If we wish to abort a calculation we can return a `This` value, but we
@@ -8977,7 +9330,6 @@ we are computing along with the primary calculation `B`. `TheseT` allows early
 exit when something special about `A` demands it, like when Charlie Bucket found
 the last golden ticket (`A`) he threw away his chocolate bar (`B`).
 
-
 ### `ContT`
 
 *Continuation Passing Style* (CPS) is a style of programming where functions
@@ -8986,28 +9338,32 @@ Javascript and Lisp as they allow non-blocking I/O via callbacks when data is
 available. A direct translation of the pattern into impure Scala looks like
 
 {lang="text"}
-~~~~~~~~
+
+```
   def foo[I, A](input: I)(next: A => Unit): Unit = next(doSomeStuff(input))
-~~~~~~~~
+```
 
 We can make this pure by introducing an `F[_]` context
 
 {lang="text"}
-~~~~~~~~
+
+```
   def foo[F[_], I, A](input: I)(next: A => F[Unit]): F[Unit]
-~~~~~~~~
+```
 
 and refactor to return a function for the provided input
 
 {lang="text"}
-~~~~~~~~
+
+```
   def foo[F[_], I, A](input: I): (A => F[Unit]) => F[Unit]
-~~~~~~~~
+```
 
 `ContT` is just a container for this signature, with a `Monad` instance
 
 {lang="text"}
-~~~~~~~~
+
+```
   final case class ContT[F[_], B, A](_run: (A => F[B]) => F[B]) {
     def run(f: A => F[B]): F[B] = _run(f)
   }
@@ -9018,16 +9374,17 @@ and refactor to return a function for the provided input
         ContT(c_fb => fa.run(a => f(a).run(c_fb)))
     }
   }
-~~~~~~~~
+```
 
 and convenient syntax to create a `ContT` from a monadic value:
 
 {lang="text"}
-~~~~~~~~
+
+```
   implicit class ContTOps[F[_]: Monad, A](self: F[A]) {
     def cps[B]: ContT[F, B, A] = ContT(a_fb => self >>= a_fb)
   }
-~~~~~~~~
+```
 
 However, the simple callback use of continuations brings nothing to pure
 functional programming because we already know how to sequence non-blocking,
@@ -9035,46 +9392,48 @@ potentially distributed, computations: that is what `Monad` is for and we can do
 this with `.bind` or a `Kleisli` arrow. To see why continuations are useful we
 need to consider a more complex example under a rigid design constraint.
 
-
 #### Control Flow
 
 Say we have modularised our application into components that can perform I/O,
 with each component owned by a different development team:
 
 {lang="text"}
-~~~~~~~~
+
+```
   final case class A0()
   final case class A1()
   final case class A2()
   final case class A3()
   final case class A4()
-  
+
   def bar0(a4: A4): IO[A0] = ...
   def bar2(a1: A1): IO[A2] = ...
   def bar3(a2: A2): IO[A3] = ...
   def bar4(a3: A3): IO[A4] = ...
-~~~~~~~~
+```
 
 Our goal is to produce an `A0` given an `A1`. Whereas Javascript and Lisp would
 reach for continuations to solve this problem (because the I/O could block) we
 can just chain the functions
 
 {lang="text"}
-~~~~~~~~
+
+```
   def simple(a: A1): IO[A0] = bar2(a) >>= bar3 >>= bar4 >>= bar0
-~~~~~~~~
+```
 
 We can lift `.simple` into its continuation form by using the convenient `.cps`
 syntax and a little bit of extra boilerplate for each step:
 
 {lang="text"}
-~~~~~~~~
+
+```
   def foo1(a: A1): ContT[IO, A0, A2] = bar2(a).cps
   def foo2(a: A2): ContT[IO, A0, A3] = bar3(a).cps
   def foo3(a: A3): ContT[IO, A0, A4] = bar4(a).cps
-  
+
   def flow(a: A1): IO[A0]  = (foo1(a) >>= foo2 >>= foo3).run(bar0)
-~~~~~~~~
+```
 
 So what does this buy us? Firstly, it is worth noting that the control flow of
 this application is left to right
@@ -9102,14 +9461,15 @@ the result of the `next` continuation:
 Which can be defined with
 
 {lang="text"}
-~~~~~~~~
+
+```
   def foo2(a: A2): ContT[IO, A0, A3] = ContT { next =>
     for {
       a3  <- bar3(a)
       a0  <- next(a3)
     } yield process(a0)
   }
-~~~~~~~~
+```
 
 We are not limited to `.map` over the return value, we can `.bind` into another
 control flow turning the linear flow into a graph!
@@ -9118,7 +9478,8 @@ control flow turning the linear flow into a graph!
 ![](images/contt-elsewhere.png)
 
 {lang="text"}
-~~~~~~~~
+
+```
   def elsewhere: ContT[IO, A0, A4] = ???
   def foo2(a: A2): ContT[IO, A0, A3] = ContT { next =>
     for {
@@ -9128,7 +9489,7 @@ control flow turning the linear flow into a graph!
              else elsewhere.run(bar0)
     } yield a0_
   }
-~~~~~~~~
+```
 
 Or we can stay within the original flow and retry everything downstream
 
@@ -9136,7 +9497,8 @@ Or we can stay within the original flow and retry everything downstream
 ![](images/contt-retry.png)
 
 {lang="text"}
-~~~~~~~~
+
+```
   def foo2(a: A2): ContT[IO, A0, A3] = ContT { next =>
     for {
       a3  <- bar3(a)
@@ -9145,7 +9507,7 @@ Or we can stay within the original flow and retry everything downstream
              else next(a3)
     } yield a0_
   }
-~~~~~~~~
+```
 
 This is just one retry, not an infinite loop. For example, we might want
 downstream to reconfirm a potentially dangerous action.
@@ -9154,10 +9516,10 @@ Finally, we can perform actions that are specific to the context of the `ContT`,
 in this case `IO` which lets us do error handling and resource cleanup:
 
 {lang="text"}
-~~~~~~~~
-  def foo2(a: A2): ContT[IO, A0, A3] = bar3(a).ensuring(cleanup).cps
-~~~~~~~~
 
+```
+  def foo2(a: A2): ContT[IO, A0, A3] = bar3(a).ensuring(cleanup).cps
+```
 
 #### When to Order Spaghetti
 
@@ -9179,7 +9541,6 @@ would be a good API for an extensible build tool or text editor.
 A caveat with `ContT` is that it is not stack safe, so cannot be used for
 programs that run forever.
 
-
 #### Great, kid. Don't get `ContT`.
 
 A more complex variant of `ContT` called `IndexedContT` wraps `(A => F[B]) =>
@@ -9192,14 +9553,15 @@ actually implemented in terms of an even more general structure (note the extra
 `s` before the `T`)
 
 {lang="text"}
-~~~~~~~~
+
+```
   final case class IndexedContsT[W[_], F[_], C, B, A](_run: W[A => F[B]] => F[C])
-  
+
   type IndexedContT[f[_], c, b, a] = IndexedContsT[Id, f, c, b, a]
   type ContT[f[_], b, a]           = IndexedContsT[Id, f, b, b, a]
   type ContsT[w[_], f[_], b, a]    = IndexedContsT[w, f, b, b, a]
   type Cont[b, a]                  = IndexedContsT[Id, Id, b, b, a]
-~~~~~~~~
+```
 
 where `W[_]` has a `Comonad`, and `ContT` is actually implemented as a type
 alias. Companion objects exist for these type aliases with convenient
@@ -9208,7 +9570,6 @@ constructors.
 Admittedly, five type parameters is perhaps a generalisation too far. But then
 again, over-generalisation is consistent with the sensibilities of
 continuations.
-
 
 ### Transformer Stacks and Ambiguous Implicits
 
@@ -9220,9 +9581,10 @@ transformers. For example if we construct an `F[_]` context which is a set of
 composed transformers, such as
 
 {lang="text"}
-~~~~~~~~
+
+```
   type Ctx[A] = StateT[EitherT[IO, E, ?], S, A]
-~~~~~~~~
+```
 
 we know that we are adding error handling with error type `E` (there is a
 `MonadError[Ctx, E]`) and we are managing state `S` (there is a `MonadState[Ctx,
@@ -9231,48 +9593,50 @@ S]`).
 But there are unfortunately practical drawbacks to using monad transformers and
 their companion `Monad` typeclasses:
 
-1.  Multiple implicit `Monad` parameters mean that the compiler cannot find the
-    correct syntax to use for the context.
+1. Multiple implicit `Monad` parameters mean that the compiler cannot find the
+   correct syntax to use for the context.
 
-2.  Monads do not compose in the general case, which means that the order of
-    nesting of the transformers is important.
+2. Monads do not compose in the general case, which means that the order of
+   nesting of the transformers is important.
 
-3.  All the interpreters must be lifted into the common context. For example, we
-    might have an implementation of some algebra that uses for `IO` and now we
-    need to wrap it with `StateT` and `EitherT` even though they are unused
-    inside the interpreter.
+3. All the interpreters must be lifted into the common context. For example, we
+   might have an implementation of some algebra that uses for `IO` and now we
+   need to wrap it with `StateT` and `EitherT` even though they are unused
+   inside the interpreter.
 
-4.  There is a performance cost associated to each layer. And some monad
-    transformers are worse than others. `StateT` is particularly bad but even
-    `EitherT` can cause memory allocation problems for high throughput
-    applications.
+4. There is a performance cost associated to each layer. And some monad
+   transformers are worse than others. `StateT` is particularly bad but even
+   `EitherT` can cause memory allocation problems for high throughput
+   applications.
 
 We need to talk about workarounds.
-
 
 #### No Syntax
 
 Say we have an algebra
 
 {lang="text"}
-~~~~~~~~
+
+```
   trait Lookup[F[_]] {
     def look: F[Int]
   }
-~~~~~~~~
+```
 
 and some data types
 
 {lang="text"}
-~~~~~~~~
+
+```
   final case class Problem(bad: Int)
   final case class Table(last: Int)
-~~~~~~~~
+```
 
 that we want to use in our business logic
 
 {lang="text"}
-~~~~~~~~
+
+```
   def foo[F[_]](L: Lookup[F])(
     implicit
       E: MonadError[F, Problem],
@@ -9283,28 +9647,30 @@ that we want to use in our business logic
     _   <- if (i === old.last) E.raiseError(Problem(i))
            else ().pure[F]
   } yield i
-~~~~~~~~
+```
 
 The first problem we encounter is that this fails to compile
 
 {lang="text"}
-~~~~~~~~
+
+```
   [error] value flatMap is not a member of type parameter F[Table]
   [error]     old <- S.get
   [error]              ^
-~~~~~~~~
+```
 
 There are some tactical solutions to this problem. The most obvious is to make
 all the parameters explicit
 
 {lang="text"}
-~~~~~~~~
+
+```
   def foo1[F[_]: Monad](
     L: Lookup[F],
     E: MonadError[F, Problem],
     S: MonadState[F, Table]
   ): F[Int] = ...
-~~~~~~~~
+```
 
 and require only `Monad` to be passed implicitly via context bounds. However,
 this means that we must manually wire up the `MonadError` and `MonadState` when
@@ -9317,47 +9683,51 @@ implicit resolution when calling us but we still need to pass parameters
 explicitly if we call out.
 
 {lang="text"}
-~~~~~~~~
+
+```
   @inline final def shadow[A, B, C](a: A, b: B)(f: (A, B) => C): C = f(a, b)
-  
+
   def foo2a[F[_]: Monad](L: Lookup[F])(
     implicit
     E: MonadError[F, Problem],
     S: MonadState[F, Table]
   ): F[Int] = shadow(E, S) { (E, S) => ...
-~~~~~~~~
+```
 
 or we could shadow just one `Monad`, leaving the other one to provide our syntax
 and to be available for when we call out to other methods
 
 {lang="text"}
-~~~~~~~~
+
+```
   @inline final def shadow[A, B](a: A)(f: A => B): B = f(a)
   ...
-  
+
   def foo2b[F[_]](L: Lookup[F])(
     implicit
     E: MonadError[F, Problem],
     S: MonadState[F, Table]
   ): F[Int] = shadow(E) { E => ...
-~~~~~~~~
+```
 
 A third option, with a higher up-front cost, is to create a custom `Monad`
 typeclass that holds `implicit` references to the two `Monad` classes that we
 care about
 
 {lang="text"}
-~~~~~~~~
+
+```
   trait MonadErrorState[F[_], E, S] {
     implicit def E: MonadError[F, E]
     implicit def S: MonadState[F, S]
   }
-~~~~~~~~
+```
 
 and a derivation of the typeclass given a `MonadError` and `MonadState`
 
 {lang="text"}
-~~~~~~~~
+
+```
   object MonadErrorState {
     implicit def create[F[_], E, S](
       implicit
@@ -9368,12 +9738,13 @@ and a derivation of the typeclass given a `MonadError` and `MonadState`
       def S: MonadState[F, S] = S0
     }
   }
-~~~~~~~~
+```
 
 Now if we want access to `S` or `E` we get them via `F.S` or `F.E`
 
 {lang="text"}
-~~~~~~~~
+
+```
   def foo3a[F[_]: Monad](L: Lookup[F])(
     implicit F: MonadErrorState[F, Problem, Table]
   ): F[Int] =
@@ -9383,21 +9754,21 @@ Now if we want access to `S` or `E` we get them via `F.S` or `F.E`
       _ <- if (i === old.last) F.E.raiseError(Problem(i))
       else ().pure[F]
     } yield i
-~~~~~~~~
+```
 
 Like the second solution, we can choose one of the `Monad` instances to be
 `implicit` within the block, achieved by importing it
 
 {lang="text"}
-~~~~~~~~
+
+```
   def foo3b[F[_]](L: Lookup[F])(
     implicit F: MonadErrorState[F, Problem, Table]
   ): F[Int] = {
     import F.E
     ...
   }
-~~~~~~~~
-
+```
 
 #### Composing Transformers
 
@@ -9411,25 +9782,26 @@ everything we need.
 A rule of thumb is that more complex transformers go on the outside, with this
 chapter presenting transformers in increasing order of complex.
 
-
 #### Lifting Interpreters
 
 Continuing the same example, let's say our `Lookup` algebra has an `IO`
 interpreter
 
 {lang="text"}
-~~~~~~~~
+
+```
   object LookupRandom extends Lookup[IO] {
     def look: IO[Int] = IO { util.Random.nextInt }
   }
-~~~~~~~~
+```
 
 but we want our context to be
 
 {lang="text"}
-~~~~~~~~
+
+```
   type Ctx[A] = StateT[EitherT[IO, Problem, ?], Table, A]
-~~~~~~~~
+```
 
 to give us a `MonadError` and a `MonadState`. This means we need to wrap
 `LookupRandom` to operate over `Ctx`.
@@ -9441,52 +9813,57 @@ Firstly, we want to make use of the `.liftM` syntax on `Monad`, which uses
 `MonadTrans` to lift from our starting `F[A]` into `G[F, A]`
 
 {lang="text"}
-~~~~~~~~
+
+```
   final class MonadOps[F[_]: Monad, A](fa: F[A]) {
     def liftM[G[_[_], _]: MonadTrans]: G[F, A] = ...
     ...
   }
-~~~~~~~~
+```
 
 It is important to realise that the type parameters to `.liftM` have two type
 holes, one of shape `_[_]` and another of shape `_`. If we create type aliases
 of this shape
 
 {lang="text"}
-~~~~~~~~
+
+```
   type Ctx0[F[_], A] = StateT[EitherT[F, Problem, ?], Table, A]
   type Ctx1[F[_], A] = EitherT[F, Problem, A]
   type Ctx2[F[_], A] = StateT[F, Table, A]
-~~~~~~~~
+```
 
 We can abstract over `MonadTrans` to lift a `Lookup[F]` to any `Lookup[G[F, ?]]`
 where `G` is a Monad Transformer:
 
 {lang="text"}
-~~~~~~~~
+
+```
   def liftM[F[_]: Monad, G[_[_], _]: MonadTrans](f: Lookup[F]) =
     new Lookup[G[F, ?]] {
       def look: G[F, Int] = f.look.liftM[G]
     }
-~~~~~~~~
+```
 
 Allowing us to wrap once for `EitherT`, and then again for `StateT`
 
 {lang="text"}
-~~~~~~~~
+
+```
   val wrap1 = Lookup.liftM[IO, Ctx1](LookupRandom)
   val wrap2: Lookup[Ctx] = Lookup.liftM[EitherT[IO, Problem, ?], Ctx2](wrap1)
-~~~~~~~~
+```
 
 Another way to achieve this, in a single step, is to use `MonadIO` which enables
 lifting an `IO` into a transformer stack:
 
 {lang="text"}
-~~~~~~~~
+
+```
   @typeclass trait MonadIO[F[_]] extends Monad[F] {
     def liftIO[A](ioa: IO[A]): F[A]
   }
-~~~~~~~~
+```
 
 with `MonadIO` instances for all the common combinations of transformers.
 
@@ -9496,18 +9873,18 @@ definition), plus one line per element of the algebra, and a final line to call
 it:
 
 {lang="text"}
-~~~~~~~~
+
+```
   def liftIO[F[_]: MonadIO](io: Lookup[IO]) = new Lookup[F] {
     def look: F[Int] = io.look.liftIO[F]
   }
-  
+
   val L: Lookup[Ctx] = Lookup.liftIO(LookupRandom)
-~~~~~~~~
+```
 
 A> A compiler plugin that automatically produces `.liftM`, `.liftIO`, and
 A> additional boilerplate that arises in this chapter, would be a great
 A> contribution to the ecosystem!
-
 
 #### Performance
 
@@ -9526,7 +9903,6 @@ typeclasses, like `MonadState` is that we can create an optimised `F[_]` for our
 application that provides the typeclasses naturally. We will learn how to create
 an optimal `F[_]` over the next two chapters, when we deep dive into two
 structures which we have already seen: `Free` and `IO`.
-
 
 ## A Free Lunch
 
@@ -9555,7 +9931,6 @@ that allows us to batch or de-duplicate expensive network I/O.
 In this section we will learn how to create free structures, and how they can be
 used.
 
-
 ### `Free` (`Monad`)
 
 Fundamentally, a monad describes a sequential program where every step depends
@@ -9573,7 +9948,8 @@ As a refresher, `Free` is the data structure representation of a `Monad` and is
 defined by three members
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed abstract class Free[S[_], A] {
     def mapSuspension[T[_]](f: S ~> T): Free[T, A] = ...
     def foldMap[M[_]: Monad](f: S ~> M): M[A] = ...
@@ -9581,28 +9957,29 @@ defined by three members
   }
   object Free {
     implicit def monad[S[_], A]: Monad[Free[S, A]] = ...
-  
+
     private final case class Suspend[S[_], A](a: S[A]) extends Free[S, A]
     private final case class Return[S[_], A](a: A)     extends Free[S, A]
     private final case class Gosub[S[_], A0, B](
       a: Free[S, A0],
       f: A0 => Free[S, B]
     ) extends Free[S, B] { type A = A0 }
-  
+
     def liftF[S[_], A](value: S[A]): Free[S, A] = Suspend(value)
     ...
   }
-~~~~~~~~
+```
 
--   `Suspend` represents a program that has not yet been interpreted
--   `Return` is `.pure`
--   `Gosub` is `.bind`
+- `Suspend` represents a program that has not yet been interpreted
+- `Return` is `.pure`
+- `Gosub` is `.bind`
 
 A `Free[S, A]` can be *freely generated* for any algebra `S`. To make this
 explicit, consider our application's `Machines` algebra
 
 {lang="text"}
-~~~~~~~~
+
+```
   trait Machines[F[_]] {
     def getTime: F[Epoch]
     def getManaged: F[NonEmptyList[MachineNode]]
@@ -9610,7 +9987,7 @@ explicit, consider our application's `Machines` algebra
     def start(node: MachineNode): F[Unit]
     def stop(node: MachineNode): F[Unit]
   }
-~~~~~~~~
+```
 
 We define a freely generated `Free` for `Machines` by creating an ADT with a
 data type for each element of the algebra. Each data type has the same input
@@ -9618,7 +9995,8 @@ parameters as its corresponding element, is parameterised over the return type,
 and has the same name:
 
 {lang="text"}
-~~~~~~~~
+
+```
   object Machines {
     sealed abstract class Ast[A]
     final case class GetTime()                extends Ast[Epoch]
@@ -9627,7 +10005,7 @@ and has the same name:
     final case class Start(node: MachineNode) extends Ast[Unit]
     final case class Stop(node: MachineNode)  extends Ast[Unit]
     ...
-~~~~~~~~
+```
 
 The ADT defines an Abstract Syntax Tree (AST) because each member is
 representing a computation in a program.
@@ -9640,7 +10018,8 @@ We then define `.liftF`, an implementation of `Machines`, with `Free[Ast, ?]` as
 the context. Every method simply delegates to `Free.liftT` to create a `Suspend`
 
 {lang="text"}
-~~~~~~~~
+
+```
   ...
     def liftF = new Machines[Free[Ast, ?]] {
       def getTime = Free.liftF(GetTime())
@@ -9650,7 +10029,7 @@ the context. Every method simply delegates to `Free.liftT` to create a `Suspend`
       def stop(node: MachineNode) = Free.liftF(Stop(node))
     }
   }
-~~~~~~~~
+```
 
 When we construct our program, parameterised over a `Free`, we run it by
 providing an *interpreter* (a natural transformation `Ast ~> M`) to the
@@ -9658,14 +10037,15 @@ providing an *interpreter* (a natural transformation `Ast ~> M`) to the
 `IO` we can construct an `IO[Unit]` program via the free AST
 
 {lang="text"}
-~~~~~~~~
+
+```
   def program[F[_]: Monad](M: Machines[F]): F[Unit] = ...
-  
+
   val interpreter: Machines.Ast ~> IO = ...
-  
+
   val app: IO[Unit] = program[Free[Machines.Ast, ?]](Machines.liftF)
                         .foldMap(interpreter)
-~~~~~~~~
+```
 
 For completeness, an interpreter that delegates to a direct implementation is
 easy to write. This might be useful if the rest of the application is using
@@ -9673,7 +10053,8 @@ easy to write. This might be useful if the rest of the application is using
 use:
 
 {lang="text"}
-~~~~~~~~
+
+```
   def interpreter[F[_]](f: Machines[F]): Ast ~> F = λ[Ast ~> F] {
     case GetTime()    => f.getTime
     case GetManaged() => f.getManaged
@@ -9681,13 +10062,14 @@ use:
     case Start(node)  => f.start(node)
     case Stop(node)   => f.stop(node)
   }
-~~~~~~~~
+```
 
 But our business logic needs more than just `Machines`, we also need access to
 the `Drone` algebra, recall defined as
 
 {lang="text"}
-~~~~~~~~
+
+```
   trait Drone[F[_]] {
     def getBacklog: F[Int]
     def getAgents: F[Int]
@@ -9698,15 +10080,16 @@ the `Drone` algebra, recall defined as
     def liftF = ...
     def interpreter = ...
   }
-~~~~~~~~
+```
 
 What we want is for our AST to be a combination of the `Machines` and `Drone`
 ASTs. We studied `Coproduct` in Chapter 6, a higher kinded disjunction:
 
 {lang="text"}
-~~~~~~~~
+
+```
   final case class Coproduct[F[_], G[_], A](run: F[A] \/ G[A])
-~~~~~~~~
+```
 
 We can use the context `Free[Coproduct[Machines.Ast, Drone.Ast, ?], ?]`.
 
@@ -9716,7 +10099,8 @@ and we'd have to do it all again if we wanted to add a third algebra.
 The `scalaz.Inject` typeclass helps:
 
 {lang="text"}
-~~~~~~~~
+
+```
   type :<:[F[_], G[_]] = Inject[F, G]
   sealed abstract class Inject[F[_], G[_]] {
     def inj[A](fa: F[A]): G[A]
@@ -9726,13 +10110,14 @@ The `scalaz.Inject` typeclass helps:
     implicit def left[F[_], G[_]]: F :<: Coproduct[F, G, ?]] = ...
     ...
   }
-~~~~~~~~
+```
 
 The `implicit` derivations generate `Inject` instances when we need them,
 letting us rewrite our `liftF` to work for any combination of ASTs:
 
 {lang="text"}
-~~~~~~~~
+
+```
   def liftF[F[_]](implicit I: Ast :<: F) = new Machines[Free[F, ?]] {
     def getTime                  = Free.liftF(I.inj(GetTime()))
     def getManaged               = Free.liftF(I.inj(GetManaged()))
@@ -9740,7 +10125,7 @@ letting us rewrite our `liftF` to work for any combination of ASTs:
     def start(node: MachineNode) = Free.liftF(I.inj(Start(node)))
     def stop(node: MachineNode)  = Free.liftF(I.inj(Stop(node)))
   }
-~~~~~~~~
+```
 
 It is nice that `F :<: G` reads as if our `Ast` is a member of the complete `F`
 instruction set: this syntax is intentional.
@@ -9753,49 +10138,52 @@ A> members of the algebra have the same type signature, we might not notice.
 Putting it all together, lets say we have a program that we wrote abstracting over `Monad`
 
 {lang="text"}
-~~~~~~~~
+
+```
   def program[F[_]: Monad](M: Machines[F], D: Drone[F]): F[Unit] = ...
-~~~~~~~~
+```
 
 and we have some existing implementations of `Machines` and `Drone`, we can
 create interpreters from them:
 
 {lang="text"}
-~~~~~~~~
+
+```
   val MachinesIO: Machines[IO] = ...
   val DroneIO: Drone[IO]       = ...
-  
+
   val M: Machines.Ast ~> IO = Machines.interpreter(MachinesIO)
   val D: Drone.Ast ~> IO    = Drone.interpreter(DroneIO)
-~~~~~~~~
+```
 
 and combine them into the larger instruction set using a convenience method from
 the `NaturalTransformation` companion
 
 {lang="text"}
-~~~~~~~~
+
+```
   object NaturalTransformation {
     def or[F[_], G[_], H[_]](fg: F ~> G, hg: H ~> G): Coproduct[F, H, ?] ~> G = ...
     ...
   }
-  
+
   type Ast[a] = Coproduct[Machines.Ast, Drone.Ast, a]
-  
+
   val interpreter: Ast ~> IO = NaturalTransformation.or(M, D)
-~~~~~~~~
+```
 
 Then use it to produce an `IO`
 
 {lang="text"}
-~~~~~~~~
+
+```
   val app: IO[Unit] = program[Free[Ast, ?]](Machines.liftF, Drone.liftF)
                         .foldMap(interpreter)
-~~~~~~~~
+```
 
 But we've gone in circles! We could have used `IO` as the context for our
 program in the first place and avoided `Free`. So why did we put ourselves
 through all this pain? Here are some examples of where `Free` might be useful.
-
 
 #### Testing: Mocks and Stubs
 
@@ -9808,23 +10196,25 @@ If the `.Ast` and `.liftF` is defined for an algebra, we can create *partial
 interpreters*
 
 {lang="text"}
-~~~~~~~~
+
+```
   val M: Machines.Ast ~> Id = stub[Map[MachineNode, Epoch]] {
     case Machines.GetAlive() => Map.empty
   }
   val D: Drone.Ast ~> Id = stub[Int] {
     case Drone.GetBacklog() => 1
   }
-~~~~~~~~
+```
 
 which can be used to test our `program`
 
 {lang="text"}
-~~~~~~~~
+
+```
   program[Free[Ast, ?]](Machines.liftF, Drone.liftF)
     .foldMap(or(M, D))
     .shouldBe(1)
-~~~~~~~~
+```
 
 By using partial functions, and not total functions, we are exposing ourselves
 to runtime errors. Many teams are happy to accept this risk in their unit tests
@@ -9852,7 +10242,6 @@ A>     def stub[A]: Stub[A] = new Stub[A]
 A>   }
 A> ~~~~~~~~
 
-
 #### Monitoring
 
 It is typical for server applications to be monitored by runtime agents that
@@ -9872,7 +10261,8 @@ A> implementation of `Memo`.
 For example, consider using this `Ast ~> Ast` "agent"
 
 {lang="text"}
-~~~~~~~~
+
+```
   val Monitor = λ[Demo.Ast ~> Demo.Ast](
     _.run match {
       case \/-(m @ Drone.GetBacklog()) =>
@@ -9882,7 +10272,7 @@ For example, consider using this `Ast ~> Ast` "agent"
         Coproduct(other)
     }
   )
-~~~~~~~~
+```
 
 which records method invocations: we would use a vendor-specific routine in real
 code. We could also watch for specific messages of interest and log them as a
@@ -9891,17 +10281,18 @@ debugging aid.
 We can attach `Monitor` to our production `Free` application with
 
 {lang="text"}
-~~~~~~~~
+
+```
   .mapSuspension(Monitor).foldMap(interpreter)
-~~~~~~~~
+```
 
 or combine the natural transformations and run with a single
 
 {lang="text"}
-~~~~~~~~
-  .foldMap(Monitor.andThen(interpreter))
-~~~~~~~~
 
+```
+  .foldMap(Monitor.andThen(interpreter))
+```
 
 #### Monkey Patching
 
@@ -9924,12 +10315,13 @@ special case the instruction in a custom natural transformation with its return
 value:
 
 {lang="text"}
-~~~~~~~~
+
+```
   val monkey = λ[Machines.Ast ~> Free[Machines.Ast, ?]] {
     case Machines.Stop(MachineNode("#c0ffee")) => Free.pure(())
     case other                                 => Free.liftF(other)
   }
-~~~~~~~~
+```
 
 eyeball that it works, push it to prod, and set an alarm for next week to remind
 us to remove it, and revoke Bob's access to our servers.
@@ -9938,12 +10330,13 @@ Our unit test could use `State` as the target context, so we can keep track of
 all the nodes we stopped:
 
 {lang="text"}
-~~~~~~~~
+
+```
   type S = Set[MachineNode]
   val M: Machines.Ast ~> State[S, ?] = Mocker.stub[Unit] {
     case Machines.Stop(node) => State.modify[S](_ + node)
   }
-  
+
   Machines
     .liftF[Machines.Ast]
     .stop(MachineNode("#c0ffee"))
@@ -9951,7 +10344,7 @@ all the nodes we stopped:
     .foldMap(M)
     .exec(Set.empty)
     .shouldBe(Set.empty)
-~~~~~~~~
+```
 
 along with a test that "normal" nodes are not affected.
 
@@ -9963,7 +10356,6 @@ implementation but an advantage of using `Free` is that we don't need to touch
 the existing code and can instead isolate and test this (temporary) behaviour,
 without being tied to the `IO` implementations.
 
-
 ### `FreeAp` (`Applicative`)
 
 Despite this chapter being called **Advanced Monads**, the takeaway is: *we
@@ -9974,7 +10366,8 @@ will see why `FreeAp` (free applicative) is preferable to `Free` monads.
 methods from the `Applicative` typeclass:
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed abstract class FreeAp[S[_], A] {
     def hoist[G[_]](f: S ~> G): FreeAp[G,A] = ...
     def foldMap[G[_]: Applicative](f: S ~> G): G[A] = ...
@@ -9984,18 +10377,18 @@ methods from the `Applicative` typeclass:
   }
   object FreeAp {
     implicit def applicative[S[_], A]: Applicative[FreeAp[S, A]] = ...
-  
+
     private final case class Pure[S[_], A](a: A) extends FreeAp[S, A]
     private final case class Ap[S[_], A, B](
       value: () => S[B],
       function: () => FreeAp[S, B => A]
     ) extends FreeAp[S, A]
-  
+
     def pure[S[_], A](a: A): FreeAp[S, A] = Pure(a)
     def lift[S[_], A](x: =>S[A]): FreeAp[S, A] = ...
     ...
   }
-~~~~~~~~
+```
 
 The methods `.hoist` and `.foldMap` are like their `Free` analogues
 `.mapSuspension` and `.foldMap`.
@@ -10007,13 +10400,13 @@ subsystems yet use them as part of a larger `Free` program.
 Like `Free`, we must create a `FreeAp` for our ASTs, more boilerplate...
 
 {lang="text"}
-~~~~~~~~
+
+```
   def liftA[F[_]](implicit I: Ast :<: F) = new Machines[FreeAp[F, ?]] {
     def getTime = FreeAp.lift(I.inj(GetTime()))
     ...
   }
-~~~~~~~~
-
+```
 
 #### Batching Network Calls
 
@@ -10024,7 +10417,7 @@ motivation for why we should focus on reducing network calls to optimise an
 application:
 
 | Computer                          | Human Timescale | Human Analogy                  |
-|--------------------------------- |--------------- |------------------------------ |
+| --------------------------------- | --------------- | ------------------------------ |
 | L1 cache reference                | 0.5 secs        | One heart beat                 |
 | Branch mispredict                 | 5 secs          | Yawn                           |
 | L2 cache reference                | 7 secs          | Long yawn                      |
@@ -10051,110 +10444,118 @@ cluttering the business logic.
 Luckily, our main business logic only requires an `Applicative`, recall
 
 {lang="text"}
-~~~~~~~~
+
+```
   final class DynAgentsModule[F[_]: Applicative](D: Drone[F], M: Machines[F])
       extends DynAgents[F] {
     def act(world: WorldView): F[WorldView] = ...
     ...
   }
-~~~~~~~~
+```
 
 To begin, we create the `lift` boilerplate for a new `Batch` algebra
 
 {lang="text"}
-~~~~~~~~
+
+```
   trait Batch[F[_]] {
     def start(nodes: NonEmptyList[MachineNode]): F[Unit]
   }
   object Batch {
     sealed abstract class Ast[A]
     final case class Start(nodes: NonEmptyList[MachineNode]) extends Ast[Unit]
-  
+
     def liftA[F[_]](implicit I: Ast :<: F) = new Batch[FreeAp[F, ?]] {
       def start(nodes: NonEmptyList[MachineNode]) = FreeAp.lift(I.inj(Start(nodes)))
     }
   }
-~~~~~~~~
+```
 
 and then we will create an instance of `DynAgentsModule` with `FreeAp` as the context
 
 {lang="text"}
-~~~~~~~~
+
+```
   type Orig[a] = Coproduct[Machines.Ast, Drone.Ast, a]
-  
+
   val world: WorldView = ...
   val program = new DynAgentsModule(Drone.liftA[Orig], Machines.liftA[Orig])
   val freeap  = program.act(world)
-~~~~~~~~
+```
 
 In Chapter 6, we studied the `Const` data type, which allows us to analyse a
 program. It should not be surprising that `FreeAp.analyze` is implemented in
 terms of `Const`:
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed abstract class FreeAp[S[_], A] {
     ...
     def analyze[M: Monoid](f: S ~> λ[α => M]): M =
       foldMap(λ[S ~> Const[M, ?]](x => Const(f(x)))).getConst
   }
-~~~~~~~~
+```
 
 We provide a natural transformation to record all node starts and `.analyze` our
 program to get all the nodes that need to be started:
 
 {lang="text"}
-~~~~~~~~
+
+```
   val gather = λ[Orig ~> λ[α => IList[MachineNode]]] {
     case Coproduct(-\/(Machines.Start(node))) => IList.single(node)
     case _                                    => IList.empty
   }
   val gathered: IList[MachineNode] = freeap.analyze(gather)
-~~~~~~~~
+```
 
 The next step is to extend the instruction set from `Orig` to `Extended`, which
 includes the `Batch.Ast` and write a `FreeAp` program that starts all our
 `gathered` nodes in a single network call
 
 {lang="text"}
-~~~~~~~~
+
+```
   type Extended[a] = Coproduct[Batch.Ast, Orig, a]
   def batch(nodes: IList[MachineNode]): FreeAp[Extended, Unit] =
     nodes.toNel match {
       case None        => FreeAp.pure(())
       case Some(nodes) => FreeAp.lift(Coproduct.leftc(Batch.Start(nodes)))
     }
-~~~~~~~~
+```
 
 We also need to remove all the calls to `Machines.Start`, which we can do with a natural transformation
 
 {lang="text"}
-~~~~~~~~
+
+```
   val nostart = λ[Orig ~> FreeAp[Extended, ?]] {
     case Coproduct(-\/(Machines.Start(_))) => FreeAp.pure(())
     case other                             => FreeAp.lift(Coproduct.rightc(other))
   }
-~~~~~~~~
+```
 
 Now we have two programs, and need to combine them. Recall the `*>` syntax from
 `Apply`
 
 {lang="text"}
-~~~~~~~~
+
+```
   val patched = batch(gathered) *> freeap.foldMap(nostart)
-~~~~~~~~
+```
 
 Putting it all together under a single method:
 
 {lang="text"}
-~~~~~~~~
+
+```
   def optimise[A](orig: FreeAp[Orig, A]): FreeAp[Extended, A] =
     (batch(orig.analyze(gather)) *> orig.foldMap(nostart))
-~~~~~~~~
+```
 
 That Is it! We `.optimise` every time we call `act` in our main loop, which is
 just a matter of plumbing.
-
 
 ### `Coyoneda` (`Functor`)
 
@@ -10162,7 +10563,8 @@ Named after mathematician Nobuo Yoneda, we can freely generate a `Functor` data
 structure for any algebra `S[_]`
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed abstract class Coyoneda[F[_], A] {
     def run(implicit F: Functor[F]): F[A] = ...
     def trans[G[_]](f: F ~> G): Coyoneda[G, A] = ...
@@ -10170,18 +10572,19 @@ structure for any algebra `S[_]`
   }
   object Coyoneda {
     implicit def functor[F[_], A]: Functor[Coyoneda[F, A]] = ...
-  
+
     private final case class Map[F[_], A, B](fa: F[A], f: A => B) extends Coyoneda[F, A]
     def apply[F[_], A, B](sa: F[A])(f: A => B) = Map[F, A, B](sa, f)
     def lift[F[_], A](sa: F[A]) = Map[F, A, A](sa, identity)
     ...
   }
-~~~~~~~~
+```
 
 and there is also a contravariant version
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed abstract class ContravariantCoyoneda[F[_], A] {
     def run(implicit F: Contravariant[F]): F[A] = ...
     def trans[G[_]](f: F ~> G): ContravariantCoyoneda[G, A] = ...
@@ -10189,14 +10592,14 @@ and there is also a contravariant version
   }
   object ContravariantCoyoneda {
     implicit def contravariant[F[_], A]: Contravariant[ContravariantCoyoneda[F, A]] = ...
-  
+
     private final case class Contramap[F[_], A, B](fa: F[A], f: B => A)
       extends ContravariantCoyoneda[F, A]
     def apply[F[_], A, B](sa: F[A])(f: B => A) = Contramap[F, A, B](sa, f)
     def lift[F[_], A](sa: F[A]) = Contramap[F, A, A](sa, identity)
     ...
   }
-~~~~~~~~
+```
 
 A> The colloquial for `Coyoneda` is *coyo* and `ContravariantCoyoneda` is *cocoyo*.
 A> Just some Free Fun.
@@ -10215,7 +10618,8 @@ If we want to optimise a program with coyo or cocoyo we have to provide the
 expected boilerplate for each algebra:
 
 {lang="text"}
-~~~~~~~~
+
+```
   def liftCoyo[F[_]](implicit I: Ast :<: F) = new Machines[Coyoneda[F, ?]] {
     def getTime = Coyoneda.lift(I.inj(GetTime()))
     ...
@@ -10224,22 +10628,24 @@ expected boilerplate for each algebra:
     def getTime = ContravariantCoyoneda.lift(I.inj(GetTime()))
     ...
   }
-~~~~~~~~
+```
 
 An optimisation we get by using `Coyoneda` is *map fusion* (and *contramap
 fusion*), which allows us to rewrite
 
 {lang="text"}
-~~~~~~~~
+
+```
   xs.map(a).map(b).map(c)
-~~~~~~~~
+```
 
 into
 
 {lang="text"}
-~~~~~~~~
+
+```
   xs.map(x => c(b(a(x))))
-~~~~~~~~
+```
 
 avoiding intermediate representations. For example, if `xs` is a `List` of a
 thousand elements, we save two thousand object allocations because we only map
@@ -10248,7 +10654,6 @@ over the data structure once.
 However it is arguably a lot easier to just make this kind of change in the
 original function by hand, or to wait for the [`scalaz-plugin`](https://github.com/scalaz/scalaz-plugin) project to be
 released and automatically perform these sorts of optimisations.
-
 
 ### Extensible Effects
 
@@ -10263,24 +10668,25 @@ For example, a free structure for `MonadState` is available. The `Ast` and
 type parameter on `MonadState`, and the inheritance from `Monad`:
 
 {lang="text"}
-~~~~~~~~
+
+```
   object MonadState {
     sealed abstract class Ast[S, A]
     final case class Get[S]()     extends Ast[S, S]
     final case class Put[S](s: S) extends Ast[S, Unit]
-  
+
     def liftF[F[_], S](implicit I: Ast[S, ?] :<: F) =
       new MonadState[Free[F, ?], S] with BindRec[Free[F, ?]] {
         def get       = Free.liftF(I.inj(Get[S]()))
         def put(s: S) = Free.liftF(I.inj(Put[S](s)))
-  
+
         val delegate         = Free.freeMonad[F]
         def point[A](a: =>A) = delegate.point(a)
         ...
       }
     ...
   }
-~~~~~~~~
+```
 
 This gives us the opportunity to use optimised interpreters. For example, we
 could store the `S` in an atomic field instead of building up a nested `StateT`
@@ -10340,30 +10746,30 @@ style, we need a high performance effect type that provides all the monad
 typeclasses we've covered in this chapter. We also still need to be able to run
 our `Applicative` code in parallel. This is exactly what we will cover next.
 
-
 ## `Parallel`
 
 There are two effectful operations that we almost always want to run in
 parallel:
 
-1.  `.map` over a collection of effects, returning a single effect. This is
-    achieved by `.traverse`, which delegates to the effect's `.apply2`.
-2.  running a fixed number of effects with the *scream operator* `|@|`, and
-    combining their output, again delegating to `.apply2`.
+1. `.map` over a collection of effects, returning a single effect. This is
+   achieved by `.traverse`, which delegates to the effect's `.apply2`.
+2. running a fixed number of effects with the *scream operator* `|@|`, and
+   combining their output, again delegating to `.apply2`.
 
 However, in practice, neither of these operations execute in parallel by
 default. The reason is that if our `F[_]` is implemented by a `Monad`, then the
 derived combinator laws for `.apply2` must be satisfied, which say
 
 {lang="text"}
-~~~~~~~~
+
+```
   @typeclass trait Bind[F[_]] extends Apply[F] {
     ...
     override def apply2[A, B, C](fa: =>F[A], fb: =>F[B])(f: (A, B) => C): F[C] =
       bind(fa)(a => map(fb)(b => f(a, b)))
     ...
   }
-~~~~~~~~
+```
 
 In other words, **`Monad` is explicitly forbidden from running effects in
 parallel.**
@@ -10374,63 +10780,69 @@ of `Applicative` for `F[_] @@ Parallel`, which is conveniently assigned to the
 type alias `Applicative.Par`
 
 {lang="text"}
-~~~~~~~~
+
+```
   object Applicative {
     type Par[F[_]] = Applicative[λ[α => F[α] @@ Tags.Parallel]]
     ...
   }
-~~~~~~~~
+```
 
 Monadic programs can then request an implicit `Par` in addition to their `Monad`
 
 {lang="text"}
-~~~~~~~~
+
+```
   def foo[F[_]: Monad: Applicative.Par]: F[Unit] = ...
-~~~~~~~~
+```
 
 Scalaz's `Traverse` syntax supports parallelism:
 
 {lang="text"}
-~~~~~~~~
+
+```
   implicit class TraverseSyntax[F[_], A](self: F[A]) {
     ...
     def parTraverse[G[_], B](f: A => G[B])(
       implicit F: Traverse[F], G: Applicative.Par[G]
     ): G[F[B]] = Tag.unwrap(F.traverse(self)(a => Tag(f(a))))
   }
-~~~~~~~~
+```
 
 If the implicit `Applicative.Par[IO]` is in scope, we can choose between
 sequential and parallel traversal:
 
 {lang="text"}
-~~~~~~~~
+
+```
   val input: IList[String] = ...
   def network(in: String): IO[Int] = ...
-  
+
   input.traverse(network): IO[IList[Int]] // one at a time
   input.parTraverse(network): IO[IList[Int]] // all in parallel
-~~~~~~~~
+```
 
 Similarly, we can call `.parApply` or `.parTupled` after using scream operators
 
 {lang="text"}
-~~~~~~~~
+
+```
   val fa: IO[String] = ...
   val fb: IO[String] = ...
   val fc: IO[String] = ...
-  
+
   (fa |@| fb).parTupled: IO[(String, String)]
-  
+
   (fa |@| fb |@| fc).parApply { case (a, b, c) => a + b + c }: IO[String]
-~~~~~~~~
+```
 
 It is worth noting that when we have `Applicative` programs, such as
 
 {lang="text"}
-~~~~~~~~
+
+```
   def foo[F[_]: Applicative]: F[Unit] = ...
-~~~~~~~~
+```
 
 we can use `F[A] @@ Parallel` as our program's context and get parallelism as
 the default on `.traverse` and `|@|`. Converting between the raw and `@@
@@ -10439,10 +10851,10 @@ can be painful. Therefore it is often easier to simply request both forms of
 `Applicative`
 
 {lang="text"}
-~~~~~~~~
-  def foo[F[_]: Applicative: Applicative.Par]: F[Unit] = ...
-~~~~~~~~
 
+```
+  def foo[F[_]: Applicative: Applicative.Par]: F[Unit] = ...
+```
 
 ### Breaking the Law
 
@@ -10455,15 +10867,17 @@ use of the `.apply2` implied law.
 We wrap `IO`
 
 {lang="text"}
-~~~~~~~~
+
+```
   final class MyIO[A](val io: IO[A]) extends AnyVal
-~~~~~~~~
+```
 
 and provide our own implementation of `Monad` which runs `.apply2` in parallel
 by delegating to a `@@ Parallel` instance
 
 {lang="text"}
-~~~~~~~~
+
+```
   object MyIO {
     implicit val monad: Monad[MyIO] = new Monad[MyIO] {
       override def apply2[A, B, C](fa: MyIO[A], fb: MyIO[B])(f: (A, B) => C): MyIO[C] =
@@ -10471,7 +10885,7 @@ by delegating to a `@@ Parallel` instance
       ...
     }
   }
-~~~~~~~~
+```
 
 We can now use `MyIO` as our application's context instead of `IO`, and **get
 parallelism by default**.
@@ -10501,7 +10915,8 @@ For completeness: a naive and inefficient implementation of `Applicative.Par`
 for our toy `IO` could use `Future`:
 
 {lang="text"}
-~~~~~~~~
+
+```
   object IO {
     ...
     type Par[a] = IO[a] @@ Parallel
@@ -10516,19 +10931,19 @@ for our toy `IO` could use `Future`:
           }
         )
   }
-~~~~~~~~
+```
 
 and due to [a bug in the Scala compiler](https://github.com/scala/bug/issues/10954) that treats all `@@` instances as
 orphans, we must explicitly import the implicit:
 
 {lang="text"}
-~~~~~~~~
+
+```
   import IO.ParApplicative
-~~~~~~~~
+```
 
 In the final section of this chapter we will see how Scalaz's `IO` is actually
 implemented.
-
 
 ## `IO`
 
@@ -10537,7 +10952,8 @@ ecosystem: up to 50 times faster than `Future`. `IO` is a free data structure
 specialised for use as a general effect monad.
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed abstract class IO[E, A] { ... }
   object IO {
     private final class FlatMap         ... extends IO[E, A]
@@ -10548,7 +10964,7 @@ specialised for use as a general effect monad.
     private final class AsyncEffect     ... extends IO[E, A]
     ...
   }
-~~~~~~~~
+```
 
 `IO` has **two** type parameters: it has a `Bifunctor` allowing the error type to
 be an application specific ADT. But because we are on the JVM, and must interact
@@ -10556,9 +10972,10 @@ with legacy libraries, a convenient type alias is provided that uses exceptions
 for the error type:
 
 {lang="text"}
-~~~~~~~~
+
+```
   type Task[A] = IO[Throwable, A]
-~~~~~~~~
+```
 
 A> `scalaz.ioeffect.IO` is a high performance `IO` by John de Goes. It has a
 A> separate lifecycle to the core Scalaz library and must be manually added to our
@@ -10573,14 +10990,14 @@ A> Do not use the deprecated `scalaz-effect` and `scalaz-concurrency` packages.
 A> 
 A> Prefer the `scalaz.ioeffect` variants of all typeclasses and data types.
 
-
 ### Creating
 
 There are multiple ways to create an `IO` that cover a variety of eager, lazy,
 safe and unsafe code blocks:
 
 {lang="text"}
-~~~~~~~~
+
+```
   object IO {
     // eager evaluation of an existing value
     def now[E, A](a: A): IO[E, A] = ...
@@ -10590,36 +11007,38 @@ safe and unsafe code blocks:
     def sync[E, A](effect: =>A): IO[E, A] = ...
     // lazy evaluation of a side-effecting code block that may fail
     def syncThrowable[A](effect: =>A): IO[Throwable, A] = ...
-  
+
     // create a failed IO
     def fail[E, A](error: E): IO[E, A] = ...
     // asynchronously sleeps for a specific period of time
     def sleep[E](duration: Duration): IO[E, Unit] = ...
     ...
   }
-~~~~~~~~
+```
 
 with convenient `Task` constructors:
 
 {lang="text"}
-~~~~~~~~
+
+```
   object Task {
     def apply[A](effect: =>A): Task[A] = IO.syncThrowable(effect)
     def now[A](effect: A): Task[A] = IO.now(effect)
     def fail[A](error: Throwable): Task[A] = IO.fail(error)
     def fromFuture[E, A](io: Task[Future[A]])(ec: ExecutionContext): Task[A] = ...
   }
-~~~~~~~~
+```
 
 The most common constructors, by far, when dealing with legacy code are
 `Task.apply` and `Task.fromFuture`:
 
 {lang="text"}
-~~~~~~~~
+
+```
   val fa: Task[Future[String]] = Task { ... impure code here ... }
-  
+
   Task.fromFuture(fa)(ExecutionContext.global): Task[String]
-~~~~~~~~
+```
 
 We cannot pass around raw `Future`, because it eagerly evaluates, so must always
 be constructed inside a safe block.
@@ -10628,7 +11047,6 @@ Note that the `ExecutionContext` is **not** `implicit`, contrary to the
 convention. Recall that in Scalaz we reserve the `implicit` keyword for
 typeclass derivation, to simplify the language: `ExecutionContext` is
 configuration that must be provided explicitly.
-
 
 ### Running
 
@@ -10640,21 +11058,22 @@ is beyond the scope of this book. We will instead focus on the features that
 extending `SafeApp` and implementing `.run`
 
 {lang="text"}
-~~~~~~~~
+
+```
   trait SafeApp extends RTS {
-  
+
     sealed trait ExitStatus
     object ExitStatus {
       case class ExitNow(code: Int)                         extends ExitStatus
       case class ExitWhenDone(code: Int, timeout: Duration) extends ExitStatus
       case object DoNotExit                                 extends ExitStatus
     }
-  
+
     def run(args: List[String]): IO[Void, ExitStatus]
-  
+
     final def main(args0: Array[String]): Unit = ... calls run ...
   }
-~~~~~~~~
+```
 
 A> `Void` is a type that has no values, like `scala.Nothing`. However, the Scala
 A> compiler infers `Nothing` when it fails to correctly infer a type parameter,
@@ -10668,7 +11087,6 @@ If we are integrating with a legacy system and are not in control of the entry
 point of our application, we can extend the `RTS` and gain access to unsafe
 methods to evaluate the `IO` at the entry point to our principled FP code.
 
-
 ### Features
 
 `IO` provides typeclass instances for `Bifunctor`, `MonadError[E, ?]`,
@@ -10679,19 +11097,20 @@ In addition to the functionality from the typeclasses, there are implementation
 specific methods:
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed abstract class IO[E, A] {
     // retries an action N times, until success
     def retryN(n: Int): IO[E, A] = ...
     // ... with exponential backoff
     def retryBackoff(n: Int, factor: Double, duration: Duration): IO[E, A] = ...
-  
+
     // repeats an action with a pause between invocations, until it fails
     def repeat[B](interval: Duration): IO[E, B] = ...
-  
+
     // cancel the action if it does not complete within the timeframe
     def timeout(duration: Duration): IO[E, Maybe[A]] = ...
-  
+
     // runs `release` on success or failure.
     // Note that IO[Void, Unit] cannot fail.
     def bracket[B](release: A => IO[Void, Unit])(use: A => IO[E, B]): IO[E, B] = ...
@@ -10699,31 +11118,31 @@ specific methods:
     def ensuring(finalizer: IO[Void, Unit]): IO[E, A] =
     // ignore failure and success, e.g. to ignore the result of a cleanup action
     def ignore: IO[Void, Unit] = ...
-  
+
     // runs two effects in parallel
     def par[B](that: IO[E, B]): IO[E, (A, B)] = ...
     ...
-~~~~~~~~
+```
 
 It is possible for an `IO` to be in a *terminated* state, which represents work
 that is intended to be discarded (it is neither an error nor a success). The
 utilities related to termination are:
 
 {lang="text"}
-~~~~~~~~
+
+```
   ...
     // terminate whatever actions are running with the given throwable.
     // bracket / ensuring is honoured.
     def terminate[E, A](t: Throwable): IO[E, A] = ...
-  
+
     // runs two effects in parallel, return the winner and terminate the loser
     def race(that: IO[E, A]): IO[E, A] = ...
-  
+
     // ignores terminations
     def uninterruptibly: IO[E, A] = ...
   ...
-~~~~~~~~
-
+```
 
 ### `Fiber`
 
@@ -10732,23 +11151,25 @@ can `.fork` an `IO`, and `.supervise` any incomplete fibers to ensure that they
 are terminated when the `IO` action completes
 
 {lang="text"}
-~~~~~~~~
+
+```
   ...
     def fork[E2]: IO[E2, Fiber[E, A]] = ...
     def supervised(error: Throwable): IO[E, A] = ...
   ...
-~~~~~~~~
+```
 
 When we have a `Fiber` we can `.join` back into the `IO`, or `interrupt` the
 underlying work.
 
 {lang="text"}
-~~~~~~~~
+
+```
   trait Fiber[E, A] {
     def join: IO[E, A]
     def interrupt[E2](t: Throwable): IO[E2, Unit]
   }
-~~~~~~~~
+```
 
 We can use fibers to achieve a form of optimistic concurrency control. Consider
 the case where we have `data` that we need to analyse, but we also need to
@@ -10756,9 +11177,10 @@ validate it. We can optimistically begin the analysis and cancel the work if the
 validation fails, which is performed in parallel.
 
 {lang="text"}
-~~~~~~~~
+
+```
   final class BadData(data: Data) extends Throwable with NoStackTrace
-  
+
   for {
     fiber1   <- analysis(data).fork
     fiber2   <- validate(data).fork
@@ -10767,11 +11189,10 @@ validation fails, which is performed in parallel.
                 else IO.unit
     result   <- fiber1.join
   } yield result
-~~~~~~~~
+```
 
 Another usecase for fibers is when we need to perform a *fire and forget*
 action. For example, low priority logging over a network.
-
 
 ### `Promise`
 
@@ -10779,26 +11200,26 @@ A promise represents an asynchronous variable that can be set exactly once (with
 `complete` or `error`). An unbounded number of listeners can `get` the variable.
 
 {lang="text"}
-~~~~~~~~
+
+```
   final class Promise[E, A] private (ref: AtomicReference[State[E, A]]) {
     def complete[E2](a: A): IO[E2, Boolean] = ...
     def error[E2](e: E): IO[E2, Boolean] = ...
     def get: IO[E, A] = ...
-  
+
     // interrupts all listeners
     def interrupt[E2](t: Throwable): IO[E2, Boolean] = ...
   }
   object Promise {
     def make[E, A]: IO[E, Promise[E, A]] = ...
   }
-~~~~~~~~
+```
 
 `Promise` is not something that we typically use in application code. It is a
 building block for high level concurrency frameworks.
 
 A> When an operation is guaranteed to succeed, the error type `E` is left as a free
 A> type parameter so that the caller can specify their preference.
-
 
 ### `IORef`
 
@@ -10807,17 +11228,18 @@ A> type parameter so that the caller can specify their preference.
 We can read the variable and we have a variety of ways to write or update it.
 
 {lang="text"}
-~~~~~~~~
+
+```
   final class IORef[A] private (ref: AtomicReference[A]) {
     def read[E]: IO[E, A] = ...
-  
+
     // write with immediate consistency guarantees
     def write[E](a: A): IO[E, Unit] = ...
     // write with eventual consistency guarantees
     def writeLater[E](a: A): IO[E, Unit] = ...
     // return true if an immediate write succeeded, false if not (and abort)
     def tryWrite[E](a: A): IO[E, Boolean] = ...
-  
+
     // atomic primitives for updating the value
     def compareAndSet[E](prev: A, next: A): IO[E, Boolean] = ...
     def modify[E](f: A => A): IO[E, A] = ...
@@ -10826,13 +11248,14 @@ We can read the variable and we have a variety of ways to write or update it.
   object IORef {
     def apply[E, A](a: A): IO[E, IORef[A]] = ...
   }
-~~~~~~~~
+```
 
 `IORef` is another building block and can be used to provide a high performance
 `MonadState`. For example, create a newtype specialised to `Task`
 
 {lang="text"}
-~~~~~~~~
+
+```
   final class StateTask[A](val io: Task[A]) extends AnyVal
   object StateTask {
     def create[S](initial: S): Task[MonadState[StateTask, S]] =
@@ -10845,23 +11268,24 @@ We can read the variable and we have a variety of ways to write or update it.
           ...
         }
   }
-~~~~~~~~
+```
 
 We can make use of this optimised `MonadState` implementation in a `SafeApp`,
 where our `.program` depends on optimised MTL typeclasses:
 
 {lang="text"}
-~~~~~~~~
+
+```
   object FastState extends SafeApp {
     def program[F[_]](implicit F: MonadState[F, Int]): F[ExitStatus] = ...
-  
+
     def run(@unused args: List[String]): IO[Void, ExitStatus] =
       for {
         stateMonad <- StateTask.create(10)
         output     <- program(stateMonad).io
       } yield output
   }
-~~~~~~~~
+```
 
 A more realistic application would take a variety of algebras and typeclasses as
 input.
@@ -10871,24 +11295,25 @@ A> coherence. Two instances having the same types may be managing different stat
 A> It would be prudent to isolate the construction of all such instances to the
 A> application's entrypoint.
 
-
 #### `MonadIO`
 
 The `MonadIO` that we previously studied was simplified to hide the `E`
 parameter. The actual typeclass is
 
 {lang="text"}
-~~~~~~~~
+
+```
   trait MonadIO[M[_], E] {
     def liftIO[A](io: IO[E, A])(implicit M: Monad[M]): M[A]
   }
-~~~~~~~~
+```
 
 with a minor change to the boilerplate on the companion of our algebra,
 accounting for the extra `E`:
 
 {lang="text"}
-~~~~~~~~
+
+```
   trait Lookup[F[_]] {
     def look: F[Int]
   }
@@ -10899,19 +11324,17 @@ accounting for the extra `E`:
       }
     ...
   }
-~~~~~~~~
-
+```
 
 ## Summary
 
-1.  The `Future` is broke, don't go there.
-2.  Manage stack safety with a `Trampoline`.
-3.  The Monad Transformer Library (MTL) abstracts over common effects with typeclasses.
-4.  Monad Transformers provide default implementations of the MTL.
-5.  `Free` data structures let us analyse, optimise and easily test our programs.
-6.  `IO` gives us the ability to implement algebras as effects on the world.
-7.  `IO` can perform effects in parallel and is a high performance backbone for any application.
-
+1. The `Future` is broke, don't go there.
+2. Manage stack safety with a `Trampoline`.
+3. The Monad Transformer Library (MTL) abstracts over common effects with typeclasses.
+4. Monad Transformers provide default implementations of the MTL.
+5. `Free` data structures let us analyse, optimise and easily test our programs.
+6. `IO` gives us the ability to implement algebras as effects on the world.
+7. `IO` can perform effects in parallel and is a high performance backbone for any application.
 
 # Typeclass Derivation
 
@@ -10923,23 +11346,23 @@ The creation of a typeclass instance from existing instances is known as
 
 There are four approaches to typeclass derivation:
 
-1.  Manual instances for every domain object. This is infeasible for real world
-    applications as it results in hundreds of lines of boilerplate for every line
-    of a `case class`. It is useful only for educational purposes and adhoc
-    performance optimisations.
+1. Manual instances for every domain object. This is infeasible for real world
+   applications as it results in hundreds of lines of boilerplate for every line
+   of a `case class`. It is useful only for educational purposes and adhoc
+   performance optimisations.
 
-2.  Abstract over the typeclass by an existing Scalaz typeclass. This is the
-    approach of `scalaz-deriving`, producing automated tests and derivations for
-    products and coproducts
+2. Abstract over the typeclass by an existing Scalaz typeclass. This is the
+   approach of `scalaz-deriving`, producing automated tests and derivations for
+   products and coproducts
 
-3.  Macros. However, writing a macro for each typeclass requires an advanced and
-    experienced developer. Fortunately, Jon Pretty's [Magnolia](https://github.com/propensive/magnolia) library abstracts
-    over hand-rolled macros with a simple API, centralising the complex
-    interaction with the compiler.
+3. Macros. However, writing a macro for each typeclass requires an advanced and
+   experienced developer. Fortunately, Jon Pretty's [Magnolia](https://github.com/propensive/magnolia) library abstracts
+   over hand-rolled macros with a simple API, centralising the complex
+   interaction with the compiler.
 
-4.  Write a generic program using the [Shapeless](https://github.com/milessabin/shapeless/) library. The `implicit` mechanism
-    is a language within the Scala language and can be used to write programs at
-    the type level.
+4. Write a generic program using the [Shapeless](https://github.com/milessabin/shapeless/) library. The `implicit` mechanism
+   is a language within the Scala language and can be used to write programs at
+   the type level.
 
 In this chapter we will study increasingly complex typeclasses and their
 derivations. We will begin with `scalaz-deriving` as the most principled
@@ -10947,40 +11370,40 @@ mechanism, repeating some lessons from Chapter 5 "Scalaz Typeclasses", then
 Magnolia (the easiest to use), finishing with Shapeless (the most powerful) for
 typeclasses with complex derivation logic.
 
-
 ## Running Examples
 
 This chapter will show how to define derivations for five specific typeclasses.
 Each example exhibits a feature that can be generalised:
 
 {lang="text"}
-~~~~~~~~
+
+```
   @typeclass trait Equal[A]  {
     // type parameter is in contravariant (parameter) position
     @op("===") def equal(a1: A, a2: A): Boolean
   }
-  
+
   // for requesting default values of a type when testing
   @typeclass trait Default[A] {
     // type parameter is in covariant (return) position
     def default: String \/ A
   }
-  
+
   @typeclass trait Semigroup[A] {
     // type parameter is in both covariant and contravariant position (invariant)
     @op("|+|") def append(x: A, y: =>A): A
   }
-  
+
   @typeclass trait JsEncoder[T] {
     // type parameter is in contravariant position and needs access to field names
     def toJson(t: T): JsValue
   }
-  
+
   @typeclass trait JsDecoder[T] {
     // type parameter is in covariant position and needs access to field names
     def fromJson(j: JsValue): String \/ T
   }
-~~~~~~~~
+```
 
 A> There is a school of thought that says serialisation formats, such as JSON and
 A> XML, should **not** have typeclass encoders and decoders, because it can lead to
@@ -10995,17 +11418,17 @@ A> that are coherent. As we will see later in this chapter, use-site automatic
 A> derivation with Magnolia and Shapeless, combined with limitations of the Scala
 A> compiler's implicit search, commonly leads to typeclass decoherence.
 
-
 ## `scalaz-deriving`
 
 The `scalaz-deriving` library is an extension to Scalaz and can be added to a
 project's `build.sbt` with
 
 {lang="text"}
-~~~~~~~~
+
+```
   val derivingVersion = "1.0.0"
   libraryDependencies += "org.scalaz" %% "scalaz-deriving" % derivingVersion
-~~~~~~~~
+```
 
 providing new typeclasses, shown below in relation to core Scalaz typeclasses:
 
@@ -11017,35 +11440,36 @@ A> In Scalaz 7.3, `Applicative` and `Divisible` will inherit from `InvariantAppl
 Before we proceed, here is a quick recap of the core Scalaz typeclasses:
 
 {lang="text"}
-~~~~~~~~
+
+```
   @typeclass trait InvariantFunctor[F[_]] {
     def xmap[A, B](fa: F[A], f: A => B, g: B => A): F[B]
   }
-  
+
   @typeclass trait Contravariant[F[_]] extends InvariantFunctor[F] {
     def contramap[A, B](fa: F[A])(f: B => A): F[B]
     def xmap[A, B](fa: F[A], f: A => B, g: B => A): F[B] = contramap(fa)(g)
   }
-  
+
   @typeclass trait Divisible[F[_]] extends Contravariant[F] {
     def conquer[A]: F[A]
     def divide2[A, B, C](fa: F[A], fb: F[B])(f: C => (A, B)): F[C]
     ...
     def divide22[...] = ...
   }
-  
+
   @typeclass trait Functor[F[_]] extends InvariantFunctor[F] {
     def map[A, B](fa: F[A])(f: A => B): F[B]
     def xmap[A, B](fa: F[A], f: A => B, g: B => A): F[B] = map(fa)(f)
   }
-  
+
   @typeclass trait Applicative[F[_]] extends Functor[F] {
     def point[A](a: =>A): F[A]
     def apply2[A,B,C](fa: =>F[A], fb: =>F[B])(f: (A, B) => C): F[C] = ...
     ...
     def apply12[...]
   }
-  
+
   @typeclass trait Monad[F[_]] extends Functor[F] {
     @op(">>=") def bind[A, B](fa: F[A])(f: A => F[B]): F[B]
   }
@@ -11054,8 +11478,7 @@ Before we proceed, here is a quick recap of the core Scalaz typeclasses:
     def emap[A, B](fa: F[A])(f: A => E \/ B): F[B] = ...
     ...
   }
-~~~~~~~~
-
+```
 
 ### Don't Repeat Yourself
 
@@ -11065,7 +11488,8 @@ The `Equal` typeclass has an instance of `Contravariant[Equal]`, providing
 `.contramap`:
 
 {lang="text"}
-~~~~~~~~
+
+```
   object Equal {
     implicit val contravariant = new Contravariant[Equal] {
       def contramap[A, B](fa: Equal[A])(f: B => A): Equal[B] =
@@ -11073,55 +11497,59 @@ The `Equal` typeclass has an instance of `Contravariant[Equal]`, providing
     }
     ...
   }
-~~~~~~~~
+```
 
 As users of `Equal`, we can use `.contramap` for our single parameter data
 types. Recall that typeclass instances go on the data type companions to be in
 their implicit scope:
 
 {lang="text"}
-~~~~~~~~
+
+```
   final case class Foo(s: String)
   object Foo {
     implicit val equal: Equal[Foo] = Equal[String].contramap(_.s)
   }
-  
+
   scala> Foo("hello") === Foo("world")
   false
-~~~~~~~~
+```
 
 However, not all typeclasses can have an instance of `Contravariant`. In
 particular, typeclasses with type parameters in covariant position may have a
 `Functor` instead:
 
 {lang="text"}
-~~~~~~~~
+
+```
   object Default {
     def instance[A](d: =>String \/ A) = new Default[A] { def default = d }
     implicit val string: Default[String] = instance("".right)
-  
+
     implicit val functor: Functor[Default] = new Functor[Default] {
       def map[A, B](fa: Default[A])(f: A => B): Default[B] = instance(fa.default.map(f))
     }
     ...
   }
-~~~~~~~~
+```
 
 We can now derive a `Default[Foo]`
 
 {lang="text"}
-~~~~~~~~
+
+```
   object Foo {
     implicit val default: Default[Foo] = Default[String].map(Foo(_))
     ...
   }
-~~~~~~~~
+```
 
 If a typeclass has parameters in both covariant and contravariant position, as
 is the case with `Semigroup`, it may provide an `InvariantFunctor`
 
 {lang="text"}
-~~~~~~~~
+
+```
   object Semigroup {
     implicit val invariant = new InvariantFunctor[Semigroup] {
       def xmap[A, B](ma: Semigroup[A], f: A => B, g: B => A) = new Semigroup[B] {
@@ -11130,29 +11558,31 @@ is the case with `Semigroup`, it may provide an `InvariantFunctor`
     }
     ...
   }
-~~~~~~~~
+```
 
 and we can call `.xmap`
 
 {lang="text"}
-~~~~~~~~
+
+```
   object Foo {
     implicit val semigroup: Semigroup[Foo] = Semigroup[String].xmap(Foo(_), _.s)
     ...
   }
-~~~~~~~~
+```
 
 Generally, it is simpler to just use `.xmap` instead of `.map` or `.contramap`:
 
 {lang="text"}
-~~~~~~~~
+
+```
   final case class Foo(s: String)
   object Foo {
     implicit val equal: Equal[Foo]         = Equal[String].xmap(Foo(_), _.s)
     implicit val default: Default[Foo]     = Default[String].xmap(Foo(_), _.s)
     implicit val semigroup: Semigroup[Foo] = Semigroup[String].xmap(Foo(_), _.s)
   }
-~~~~~~~~
+```
 
 A> The `@xderiving` annotation automatically inserts `.xmap` boilerplate. Add the
 A> following to `build.sbt`
@@ -11171,7 +11601,6 @@ A>   @xderiving(Equal, Default, Semigroup)
 A>   final case class Foo(s: String)
 A> ~~~~~~~~
 
-
 ### `MonadError`
 
 Typically things that *write* from a polymorphic value have a `Contravariant`,
@@ -11181,25 +11610,27 @@ very much expected that reading can fail. For example, if we have a default
 NonEmpty` from it
 
 {lang="text"}
-~~~~~~~~
+
+```
   import eu.timepit.refined.refineV
   import eu.timepit.refined.api._
   import eu.timepit.refined.collection._
-  
+
   implicit val nes: Default[String Refined NonEmpty] =
     Default[String].map(refineV[NonEmpty](_))
-~~~~~~~~
+```
 
 fails to compile with
 
 {lang="text"}
-~~~~~~~~
+
+```
   [error] default.scala:41:32: polymorphic expression cannot be instantiated to expected type;
   [error]  found   : Either[String, String Refined NonEmpty]
   [error]  required: String Refined NonEmpty
   [error]     Default[String].map(refineV[NonEmpty](_))
   [error]                                          ^
-~~~~~~~~
+```
 
 Recall from Chapter 4.1 that `refineV` returns an `Either`, as the compiler has
 reminded us.
@@ -11208,7 +11639,8 @@ As the typeclass author of `Default`, we can do better than `Functor` and
 provide a `MonadError[Default, String]`:
 
 {lang="text"}
-~~~~~~~~
+
+```
   implicit val monad = new MonadError[Default, String] {
     def point[A](a: =>A): Default[A] =
       instance(a.right)
@@ -11219,24 +11651,26 @@ provide a `MonadError[Default, String]`:
     def raiseError[A](e: String): Default[A] =
       instance(e.left)
   }
-~~~~~~~~
+```
 
 Now we have access to `.emap` syntax and can derive our refined type
 
 {lang="text"}
-~~~~~~~~
+
+```
   implicit val nes: Default[String Refined NonEmpty] =
     Default[String].emap(refineV[NonEmpty](_).disjunction)
-~~~~~~~~
+```
 
 In fact, we can provide a derivation rule for all refined types
 
 {lang="text"}
-~~~~~~~~
+
+```
   implicit def refined[A: Default, P](
     implicit V: Validate[A, P]
   ): Default[A Refined P] = Default[A].emap(refineV[P](_).disjunction)
-~~~~~~~~
+```
 
 where `Validate` is from the refined library and is required by `refineV`.
 
@@ -11257,29 +11691,30 @@ Similarly we can use `.emap` to derive an `Int` decoder from a `Long`, with
 protection around the non-total `.toInt` stdlib method.
 
 {lang="text"}
-~~~~~~~~
+
+```
   implicit val long: Default[Long] = instance(0L.right)
   implicit val int: Default[Int] = Default[Long].emap {
     case n if (Int.MinValue <= n && n <= Int.MaxValue) => n.toInt.right
     case big => s"$big does not fit into 32 bits".left
   }
-~~~~~~~~
+```
 
 As authors of the `Default` typeclass, we might want to reconsider our API
 design so that it can never fail, e.g. with the following type signature
 
 {lang="text"}
-~~~~~~~~
+
+```
   @typeclass trait Default[A] {
     def default: A
   }
-~~~~~~~~
+```
 
 We would not be able to define a `MonadError`, forcing us to provide instances
 that always succeed. This will result in more boilerplate but gains compiletime
 safety. However, we will continue with `String \/ A` as the return type as it is
 a more general example.
-
 
 ### `.fromIso`
 
@@ -11287,17 +11722,18 @@ All of the typeclasses in Scalaz have a method on their companion with a
 signature similar to the following:
 
 {lang="text"}
-~~~~~~~~
+
+```
   object Equal {
     def fromIso[F, G: Equal](D: F <=> G): Equal[F] = ...
     ...
   }
-  
+
   object Monad {
     def fromIso[F[_], G[_]: Monad](D: F <~> G): Monad[F] = ...
     ...
   }
-~~~~~~~~
+```
 
 These mean that if we have a type `F`, and a way to convert it into a `G` that
 has an instance, we can call `Equal.fromIso` to obtain an instance for `F`.
@@ -11306,24 +11742,26 @@ For example, as typeclass users, if we have a data type `Bar` we can define an
 isomorphism to `(String, Int)`
 
 {lang="text"}
-~~~~~~~~
+
+```
   import Isomorphism._
-  
+
   final case class Bar(s: String, i: Int)
   object Bar {
     val iso: Bar <=> (String, Int) = IsoSet(b => (b.s, b.i), t => Bar(t._1, t._2))
   }
-~~~~~~~~
+```
 
 and then derive `Equal[Bar]` because there is already an `Equal` for all tuples:
 
 {lang="text"}
-~~~~~~~~
+
+```
   object Bar {
     ...
     implicit val equal: Equal[Bar] = Equal.fromIso(iso)
   }
-~~~~~~~~
+```
 
 The `.fromIso` mechanism can also assist us as typeclass authors. Consider
 `Default` which has a core type signature of the form `Unit => F[A]`. Our
@@ -11335,18 +11773,18 @@ Since `Kleisli` already provides a `MonadError` (if `F` has one), we can derive
 `Kleisli`:
 
 {lang="text"}
-~~~~~~~~
+
+```
   private type Sig[a] = Unit => String \/ a
   private val iso = Kleisli.iso(
     λ[Sig ~> Default](s => instance(s(()))),
     λ[Default ~> Sig](d => _ => d.default)
   )
   implicit val monad: MonadError[Default, String] = MonadError.fromIso(iso)
-~~~~~~~~
+```
 
 giving us the `.map`, `.xmap` and `.emap` that we've been making use of so far,
 effectively for free.
-
 
 ### `Divisible` and `Applicative`
 
@@ -11358,7 +11796,8 @@ A more specific typeclass than `Contravariant` is `Divisible`. `Equal` has an
 instance:
 
 {lang="text"}
-~~~~~~~~
+
+```
   implicit val divisible = new Divisible[Equal] {
     ...
     def divide[A1, A2, Z](a1: =>Equal[A1], a2: =>Equal[A2])(
@@ -11370,7 +11809,7 @@ instance:
     }
     def conquer[A]: Equal[A] = (_, _) => true
   }
-~~~~~~~~
+```
 
 A> When implementing `Divisible` the compiler will require us to provide
 A> `.contramap`, which we can do directly with an optimised implementation or with
@@ -11388,40 +11827,43 @@ And from `divide2`, `Divisible` is able to build up derivations all the way to
 `divide22`. We can call these methods directly for our data types:
 
 {lang="text"}
-~~~~~~~~
+
+```
   final case class Bar(s: String, i: Int)
   object Bar {
     implicit val equal: Equal[Bar] =
       Divisible[Equal].divide2(Equal[String], Equal[Int])(b => (b.s, b.i))
   }
-~~~~~~~~
+```
 
 The equivalent for type parameters in covariant position is `Applicative`:
 
 {lang="text"}
-~~~~~~~~
+
+```
   object Bar {
     ...
     implicit val default: Default[Bar] =
       Applicative[Default].apply2(Default[String], Default[Int])(Bar(_, _))
   }
-~~~~~~~~
+```
 
 But we must be careful that we do not break the typeclass laws when we implement
 `Divisible` or `Applicative`. In particular, it is easy to break the *law of
 composition* which says that the following two codepaths must yield exactly the
 same output
 
--   `divide2(divide2(a1, a2)(dupe), a3)(dupe)`
--   `divide2(a1, divide2(a2, a3)(dupe))(dupe)`
--   for any `dupe: A => (A, A)`
+- `divide2(divide2(a1, a2)(dupe), a3)(dupe)`
+- `divide2(a1, divide2(a2, a3)(dupe))(dupe)`
+- for any `dupe: A => (A, A)`
 
 with similar laws for `Applicative`.
 
 Consider `JsEncoder` and a proposed instance of `Divisible`
 
 {lang="text"}
-~~~~~~~~
+
+```
   new Divisible[JsEncoder] {
     ...
     def divide[A, B, C](fa: JsEncoder[A], fb: JsEncoder[B])(
@@ -11430,24 +11872,26 @@ Consider `JsEncoder` and a proposed instance of `Divisible`
       val (a, b) = f(c)
       JsArray(IList(fa.toJson(a), fb.toJson(b)))
     }
-  
+
     def conquer[A]: JsEncoder[A] = _ => JsNull
   }
-~~~~~~~~
+```
 
 On one side of the composition laws, for a `String` input, we get
 
 {lang="text"}
-~~~~~~~~
+
+```
   JsArray([JsArray([JsString(hello),JsString(hello)]),JsString(hello)])
-~~~~~~~~
+```
 
 and on the other
 
 {lang="text"}
-~~~~~~~~
+
+```
   JsArray([JsString(hello),JsArray([JsString(hello),JsString(hello)])])
-~~~~~~~~
+```
 
 which are different. We could experiment with variations of the `divide`
 implementation, but it will never satisfy the laws for all inputs.
@@ -11461,23 +11905,25 @@ their laws on the typeclass itself. We can write an automated test, asserting
 that the law fails, to remind us of this fact:
 
 {lang="text"}
-~~~~~~~~
+
+```
   val D: Divisible[JsEncoder] = ...
   val S: JsEncoder[String] = JsEncoder[String]
   val E: Equal[JsEncoder[String]] = (p1, p2) => p1.toJson("hello") === p2.toJson("hello")
   assert(!D.divideLaw.composition(S, S, S)(E))
-~~~~~~~~
+```
 
 On the other hand, a similar `JsDecoder` test meets the `Applicative` composition laws
 
 {lang="text"}
-~~~~~~~~
+
+```
   final case class Comp(a: String, b: Int)
   object Comp {
     implicit val equal: Equal[Comp] = ...
     implicit val decoder: JsDecoder[Comp] = ...
   }
-  
+
   def composeTest(j: JsValue) = {
     val A: Applicative[JsDecoder] = Applicative[JsDecoder]
     val fa: JsDecoder[Comp] = JsDecoder[Comp]
@@ -11486,17 +11932,18 @@ On the other hand, a similar `JsDecoder` test meets the `Applicative` compositio
     val E: Equal[JsDecoder[(Int, String)]] = (p1, p2) => p1.fromJson(j) === p2.fromJson(j)
     assert(A.applyLaw.composition(fbc, fab, fa)(E))
   }
-~~~~~~~~
+```
 
 for some test data
 
 {lang="text"}
-~~~~~~~~
+
+```
   composeTest(JsObject(IList("a" -> JsString("hello"), "b" -> JsInteger(1))))
   composeTest(JsNull)
   composeTest(JsObject(IList("a" -> JsString("hello"))))
   composeTest(JsObject(IList("b" -> JsInteger(1))))
-~~~~~~~~
+```
 
 Now we are reasonably confident that our derived `MonadError` is lawful.
 
@@ -11514,9 +11961,10 @@ provide an `Arbitrary` for their ADTs!) allowing us to make use of Scalatest's
 `forAll` feature:
 
 {lang="text"}
-~~~~~~~~
+
+```
   forAll(SizeRange(10))((j: JsValue) => composeTest(j))
-~~~~~~~~
+```
 
 This test gives us even more confidence that our typeclass meets the
 `Applicative` composition laws. By checking all the laws on `Divisible` and
@@ -11526,7 +11974,6 @@ A> We must restrict `forAll` to have a `SizeRange` of `10`, which limits both
 A> `JsObject` and `JsArray` to a maximum size of 10 elements. This avoids stack
 A> overflows as larger numbers can generate gigantic JSON documents.
 
-
 ### `Decidable` and `Alt`
 
 Where `Divisible` and `Applicative` give us typeclass derivation for products
@@ -11534,17 +11981,18 @@ Where `Divisible` and `Applicative` give us typeclass derivation for products
 nested disjunctions):
 
 {lang="text"}
-~~~~~~~~
+
+```
   @typeclass trait Alt[F[_]] extends Applicative[F] with InvariantAlt[F] {
     def alt[A](a1: =>F[A], a2: =>F[A]): F[A]
-  
+
     def altly1[Z, A1](a1: =>F[A1])(f: A1 => Z): F[Z] = ...
     def altly2[Z, A1, A2](a1: =>F[A1], a2: =>F[A2])(f: A1 \/ A2 => Z): F[Z] = ...
     def altly3 ...
     def altly4 ...
     ...
   }
-  
+
   @typeclass trait Decidable[F[_]] extends Divisible[F] with InvariantAlt[F] {
     def choose1[Z, A1](a1: =>F[A1])(f: Z => A1): F[Z] = ...
     def choose2[Z, A1, A2](a1: =>F[A1], a2: =>F[A2])(f: Z => A1 \/ A2): F[Z] = ...
@@ -11552,12 +12000,12 @@ nested disjunctions):
     def choose4 ...
     ...
   }
-~~~~~~~~
+```
 
 The four core typeclasses have symmetric signatures:
 
 | Typeclass     | method    | given          | signature         | returns |
-|------------- |--------- |-------------- |----------------- |------- |
+| ------------- | --------- | -------------- | ----------------- | ------- |
 | `Applicative` | `apply2`  | `F[A1], F[A2]` | `(A1, A2) => Z`   | `F[Z]`  |
 | `Alt`         | `altly2`  | `F[A1], F[A2]` | `(A1 \/ A2) => Z` | `F[Z]`  |
 | `Divisible`   | `divide2` | `F[A1], F[A2]` | `Z => (A1, A2)`   | `F[Z]`  |
@@ -11569,7 +12017,8 @@ contravariant coproducts.
 We can write a `Decidable[Equal]`, letting us derive `Equal` for any ADT!
 
 {lang="text"}
-~~~~~~~~
+
+```
   implicit val decidable = new Decidable[Equal] {
     ...
     def choose2[Z, A1, A2](a1: =>Equal[A1], a2: =>Equal[A2])(
@@ -11582,21 +12031,23 @@ We can write a `Decidable[Equal]`, letting us derive `Equal` for any ADT!
       }
     }
   }
-~~~~~~~~
+```
 
 For an ADT
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed abstract class Darth { def widen: Darth = this }
   final case class Vader(s: String, i: Int)  extends Darth
   final case class JarJar(i: Int, s: String) extends Darth
-~~~~~~~~
+```
 
 where the products (`Vader` and `JarJar`) have an `Equal`
 
 {lang="text"}
-~~~~~~~~
+
+```
   object Vader {
     private val g: Vader => (String, Int) = d => (d.s, d.i)
     implicit val equal: Equal[Vader] = Divisible[Equal].divide2(Equal[String], Equal[Int])(g)
@@ -11605,12 +12056,13 @@ where the products (`Vader` and `JarJar`) have an `Equal`
     private val g: JarJar => (Int, String) = d => (d.i, d.s)
     implicit val equal: Equal[JarJar] = Divisible[Equal].divide2(Equal[Int], Equal[String])(g)
   }
-~~~~~~~~
+```
 
 we can derive the equal for the whole ADT
 
 {lang="text"}
-~~~~~~~~
+
+```
   object Darth {
     private def g(t: Darth): Vader \/ JarJar = t match {
       case p @ Vader(_, _)  => -\/(p)
@@ -11618,10 +12070,10 @@ we can derive the equal for the whole ADT
     }
     implicit val equal: Equal[Darth] = Decidable[Equal].choose2(Equal[Vader], Equal[JarJar])(g)
   }
-  
+
   scala> Vader("hello", 1).widen === JarJar(1, "hello).widen
   false
-~~~~~~~~
+```
 
 A> Scalaz 7.2 does not provide a `Decidable[Equal]` out of the box, because it was
 A> a late addition.
@@ -11632,15 +12084,16 @@ mix in `Alt`. Upgrade our `MonadError[Default, String]` to have an
 `Alt[Default]`:
 
 {lang="text"}
-~~~~~~~~
+
+```
   private type K[a] = Kleisli[String \/ ?, Unit, a]
   implicit val monad = new IsomorphismMonadError[Default, K, String] with Alt[Default] {
     override val G = MonadError[K, String]
     override val iso = ...
-  
+
     def alt[A](a1: =>Default[A], a2: =>Default[A]): Default[A] = instance(a1.default)
   }
-~~~~~~~~
+```
 
 A> The primitive of `Alt` is `alt`, much as the primitive of `Applicative` is `ap`,
 A> but it often makes more sense to use `altly2` and `apply2` as the primitives
@@ -11663,7 +12116,8 @@ A> infinite loop at runtime.
 Letting us derive our `Default[Darth]`
 
 {lang="text"}
-~~~~~~~~
+
+```
   object Darth {
     ...
     private def f(e: Vader \/ JarJar): Darth = e.merge
@@ -11682,16 +12136,17 @@ Letting us derive our `Default[Darth]`
     implicit val default: Default[JarJar] =
       Alt[Default].apply2(Default[Int], Default[String])(f)
   }
-  
+
   scala> Default[Darth].default
   \/-(Vader())
-~~~~~~~~
+```
 
 Returning to the `scalaz-deriving` typeclasses, the invariant parents of `Alt`
 and `Decidable` are:
 
 {lang="text"}
-~~~~~~~~
+
+```
   @typeclass trait InvariantApplicative[F[_]] extends InvariantFunctor[F] {
     def xproduct0[Z](f: =>Z): F[Z]
     def xproduct1[Z, A1](a1: =>F[A1])(f: A1 => Z, g: Z => A1): F[Z] = ...
@@ -11699,24 +12154,23 @@ and `Decidable` are:
     def xproduct3 ...
     def xproduct4 ...
   }
-  
+
   @typeclass trait InvariantAlt[F[_]] extends InvariantApplicative[F] {
     def xcoproduct1[Z, A1](a1: =>F[A1])(f: A1 => Z, g: Z => A1): F[Z] = ...
     def xcoproduct2 ...
     def xcoproduct3 ...
     def xcoproduct4 ...
   }
-~~~~~~~~
+```
 
 supporting typeclasses with an `InvariantFunctor` like `Monoid` and `Semigroup`.
-
 
 ### Arbitrary Arity and `@deriving`
 
 There are two problems with `InvariantApplicative` and `InvariantAlt`:
 
-1.  they only support products of four fields and coproducts of four entries.
-2.  there is a **lot** of boilerplate on the data type companions.
+1. they only support products of four fields and coproducts of four entries.
+2. there is a **lot** of boilerplate on the data type companions.
 
 In this section we solve both problems with additional typeclasses introduced by
 `scalaz-deriving`
@@ -11730,39 +12184,42 @@ the `z` postfix.
 
 The iotaz library has three main types:
 
--   `TList` which describes arbitrary length chains of types
--   `Prod[A <: TList]` for products
--   `Cop[A <: TList]` for coproducts
+- `TList` which describes arbitrary length chains of types
+- `Prod[A <: TList]` for products
+- `Cop[A <: TList]` for coproducts
 
 By way of example, a `TList` representation of `Darth` from the previous
 section is
 
 {lang="text"}
-~~~~~~~~
+
+```
   import iotaz._, TList._
-  
+
   type DarthT  = Vader  :: JarJar :: TNil
   type VaderT  = String :: Int    :: TNil
   type JarJarT = Int    :: String :: TNil
-~~~~~~~~
+```
 
 which can be instantiated:
 
 {lang="text"}
-~~~~~~~~
+
+```
   val vader: Prod[VaderT]    = Prod("hello", 1)
   val jarjar: Prod[JarJarT]  = Prod(1, "hello")
-  
+
   val VaderI = Cop.Inject[Vader, Cop[DarthT]]
   val darth: Cop[DarthT] = VaderI.inj(Vader("hello", 1))
-~~~~~~~~
+```
 
 To be able to use the `scalaz-deriving` API, we need an `Isomorphism` between
 our ADTs and the `iotaz` generic representation. It is a lot of boilerplate,
 we will get to that in a moment:
 
 {lang="text"}
-~~~~~~~~
+
+```
   object Darth {
     private type Repr   = Vader :: JarJar :: TNil
     private val VaderI  = Cop.Inject[Vader, Cop[Repr]]
@@ -11778,7 +12235,7 @@ we will get to that in a moment:
     )
     ...
   }
-  
+
   object Vader {
     private type Repr = String :: Int :: TNil
     private val iso   = IsoSet(
@@ -11787,7 +12244,7 @@ we will get to that in a moment:
     )
     ...
   }
-  
+
   object JarJar {
     private type Repr = Int :: String :: TNil
     private val iso   = IsoSet(
@@ -11796,13 +12253,14 @@ we will get to that in a moment:
     )
     ...
   }
-~~~~~~~~
+```
 
 With that out of the way we can call the `Deriving` API for `Equal`, possible
 because `scalaz-deriving` provides an optimised instance of `Deriving[Equal]`
 
 {lang="text"}
-~~~~~~~~
+
+```
   object Darth {
     ...
     implicit val equal: Equal[Darth] = Deriving[Equal].xcoproductz(
@@ -11818,7 +12276,7 @@ because `scalaz-deriving` provides an optimised instance of `Deriving[Equal]`
     implicit val equal: Equal[JarJar] = Deriving[Equal].xproductz(
       Prod(Need(Equal[Int]), Need(Equal[String])))(iso.to, iso.from)
   }
-~~~~~~~~
+```
 
 A> Typeclasses in the `Deriving` API are wrapped in `Need` (recall `Name` from
 A> Chapter 6), which allows lazy construction, avoiding unnecessary work if the
@@ -11829,17 +12287,19 @@ instance of `Deriving[Default]`. This is just a case of wrapping our existing
 `Alt` with a helper:
 
 {lang="text"}
-~~~~~~~~
+
+```
   object Default {
     ...
     implicit val deriving: Deriving[Default] = ExtendedInvariantAlt(monad)
   }
-~~~~~~~~
+```
 
 and then calling it from the companions
 
 {lang="text"}
-~~~~~~~~
+
+```
   object Darth {
     ...
     implicit val default: Default[Darth] = Deriving[Default].xcoproductz(
@@ -11855,7 +12315,7 @@ and then calling it from the companions
     implicit val default: Default[JarJar] = Deriving[Default].xproductz(
       Prod(Need(Default[Int]), Need(Default[String])))(iso.to, iso.from)
   }
-~~~~~~~~
+```
 
 We have solved the problem of arbitrary arity, but we have introduced even more
 boilerplate.
@@ -11865,19 +12325,19 @@ The punchline is that the `@deriving` annotation, which comes from
 to be applied at the top level of an ADT:
 
 {lang="text"}
-~~~~~~~~
+
+```
   @deriving(Equal, Default)
   sealed abstract class Darth { def widen: Darth = this }
   final case class Vader(s: String, i: Int)  extends Darth
   final case class JarJar(i: Int, s: String) extends Darth
-~~~~~~~~
+```
 
 Also included in `scalaz-deriving` are instances for `Order`, `Semigroup` and
 `Monoid`. Instances of `Show` and `Arbitrary` are available by installing the
 `scalaz-deriving-magnolia` and `scalaz-deriving-scalacheck` extras.
 
 You're welcome!
-
 
 ### Examples
 
@@ -11887,7 +12347,8 @@ type: `/~\`, aka the *snake in the road*, for containing two higher kinded
 structures that share the same type parameter:
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed abstract class /~\[A[_], B[_]] {
     type T
     def a: A[T]
@@ -11898,7 +12359,7 @@ structures that share the same type parameter:
     def unapply[A[_], B[_]](p: A /~\ B): Some[(A[p.T], B[p.T])] = ...
     def apply[A[_], B[_], Z](az: =>A[Z], bz: =>B[Z]): A /~\ B = ...
   }
-~~~~~~~~
+```
 
 We typically use this in the context of `Id /~\ TC` where `TC` is our typeclass,
 meaning that we have a value, and an instance of a typeclass for that value,
@@ -11909,7 +12370,6 @@ form `A PairedWith FA`, allowing the `iotaz` library to be able to perform
 `.zip`, `.traverse`, and other operations on `Prod` and `Cop`. We can ignore
 these parameters, as we don't use them directly.
 
-
 #### `Equal`
 
 As with `Default` we could define a regular fixed-arity `Decidable` and wrap it
@@ -11917,24 +12377,25 @@ with `ExtendedInvariantAlt` (the simplest approach), but we choose to implement
 `Decidablez` directly for the performance benefit. We make two additional
 optimisations:
 
-1.  perform instance equality `.eq` before applying the `Equal.equal`, allowing
-    for shortcut equality between identical values.
-2.  `Foldable.all` allowing early exit when any comparison is `false`. e.g. if
-    the first fields don't match, we don't even request the `Equal` for remaining
-    values.
+1. perform instance equality `.eq` before applying the `Equal.equal`, allowing
+   for shortcut equality between identical values.
+2. `Foldable.all` allowing early exit when any comparison is `false`. e.g. if
+   the first fields don't match, we don't even request the `Equal` for remaining
+   values.
 
 {lang="text"}
-~~~~~~~~
+
+```
   new Decidablez[Equal] {
     @inline private final def quick(a: Any, b: Any): Boolean =
       a.asInstanceOf[AnyRef].eq(b.asInstanceOf[AnyRef])
-  
+
     def dividez[Z, A <: TList, FA <: TList](tcs: Prod[FA])(g: Z => Prod[A])(
       implicit ev: A PairedWith FA
     ): Equal[Z] = (z1, z2) => (g(z1), g(z2)).zip(tcs).all {
       case (a1, a2) /~\ fa => quick(a1, a2) || fa.value.equal(a1, a2)
     }
-  
+
     def choosez[Z, A <: TList, FA <: TList](tcs: Prod[FA])(g: Z => Cop[A])(
       implicit ev: A PairedWith FA
     ): Equal[Z] = (z1, z2) => (g(z1), g(z2)).zip(tcs) match {
@@ -11942,8 +12403,7 @@ optimisations:
       case \/-((a1, a2) /~\ fa) => quick(a1, a2) || fa.value.equal(a1, a2)
     }
   }
-~~~~~~~~
-
+```
 
 #### `Default`
 
@@ -11952,7 +12412,8 @@ requires us to define natural transformations, which have a clunky syntax, even
 with the `kind-projector` plugin.
 
 {lang="text"}
-~~~~~~~~
+
+```
   private type K[a] = Kleisli[String \/ ?, Unit, a]
   new IsomorphismMonadError[Default, K, String] with Altz[Default] {
     type Sig[a] = Unit => String \/ a
@@ -11961,12 +12422,12 @@ with the `kind-projector` plugin.
       λ[Sig ~> Default](s => instance(s(()))),
       λ[Default ~> Sig](d => _ => d.default)
     )
-  
+
     val extract = λ[NameF ~> (String \/ ?)](a => a.value.default)
     def applyz[Z, A <: TList, FA <: TList](tcs: Prod[FA])(f: Prod[A] => Z)(
       implicit ev: A PairedWith FA
     ): Default[Z] = instance(tcs.traverse(extract).map(f))
-  
+
     val always = λ[NameF ~> Maybe](a => a.value.default.toMaybe)
     def altlyz[Z, A <: TList, FA <: TList](tcs: Prod[FA])(f: Cop[A] => Z)(
       implicit ev: A PairedWith FA
@@ -11974,8 +12435,7 @@ with the `kind-projector` plugin.
       tcs.coptraverse[A, NameF, Id](always).map(f).headMaybe \/> "not found"
     }
   }
-~~~~~~~~
-
+```
 
 #### `Semigroup`
 
@@ -11984,11 +12444,12 @@ possible to define one for general products. We can use the arbitrary arity
 `InvariantApplicative`:
 
 {lang="text"}
-~~~~~~~~
+
+```
   new InvariantApplicativez[Semigroup] {
     type L[a] = ((a, a), NameF[a])
     val appender = λ[L ~> Id] { case ((a1, a2), fa) => fa.value.append(a1, a2) }
-  
+
     def xproductz[Z, A <: TList, FA <: TList](tcs: Prod[FA])
                                              (f: Prod[A] => Z, g: Z => Prod[A])
                                              (implicit ev: A PairedWith FA) =
@@ -11996,8 +12457,7 @@ possible to define one for general products. We can use the arbitrary arity
         def append(z1: Z, z2: =>Z): Z = f(tcs.ziptraverse2(g(z1), g(z2), appender))
       }
   }
-~~~~~~~~
-
+```
 
 #### `JsEncoder` and `JsDecoder`
 
@@ -12008,37 +12468,39 @@ A> An earlier version of `scalaz-deriving` supported field names but it was clea
 A> that there was no advantage over using Magnolia, so the support was dropped to
 A> remain focused on typeclasses with lawful `Alt` and `Decidable`.
 
-
 ## Magnolia
 
 The Magnolia macro library provides a clean API for writing typeclass
 derivations. It is installed with the following `build.sbt` entry
 
 {lang="text"}
-~~~~~~~~
+
+```
   libraryDependencies += "com.propensive" %% "magnolia" % "0.10.1"
-~~~~~~~~
+```
 
 A typeclass author implements the following members:
 
 {lang="text"}
-~~~~~~~~
+
+```
   import magnolia._
-  
+
   object MyDerivation {
     type Typeclass[A]
-  
+
     def combine[A](ctx: CaseClass[Typeclass, A]): Typeclass[A]
     def dispatch[A](ctx: SealedTrait[Typeclass, A]): Typeclass[A]
-  
+
     def gen[A]: Typeclass[A] = macro Magnolia.gen[A]
   }
-~~~~~~~~
+```
 
 The Magnolia API is:
 
 {lang="text"}
-~~~~~~~~
+
+```
   class CaseClass[TC[_], A] {
     def typeName: TypeName
     def construct[B](f: Param[TC, A] => B): A
@@ -12046,21 +12508,22 @@ The Magnolia API is:
     def parameters: Seq[Param[TC, A]]
     def annotations: Seq[Any]
   }
-  
+
   class SealedTrait[TC[_], A] {
     def typeName: TypeName
     def subtypes: Seq[Subtype[TC, A]]
     def dispatch[B](value: A)(handle: Subtype[TC, A] => B): B
     def annotations: Seq[Any]
   }
-~~~~~~~~
+```
 
 with helpers
 
 {lang="text"}
-~~~~~~~~
+
+```
   final case class TypeName(short: String, full: String)
-  
+
   class Param[TC[_], A] {
     type PType
     def label: String
@@ -12070,7 +12533,7 @@ with helpers
     def default: Option[PType]
     def annotations: Seq[Any]
   }
-  
+
   class Subtype[TC[_], A] {
     type SType <: A
     def typeName: TypeName
@@ -12079,7 +12542,7 @@ with helpers
     def cast(a: A): SType
     def annotations: Seq[Any]
   }
-~~~~~~~~
+```
 
 The `Monadic` typeclass, used in `constructMonadic`, is automatically generated
 if our data type has a `.map` and `.flatMap` method when we `import mercator._`
@@ -12090,35 +12553,35 @@ provide a lot of extra structure and tests for free. However, Magnolia offers
 features that `scalaz-deriving` cannot provide: access to field names, type
 names, annotations and default values.
 
-
 ### Example: JSON
 
 We have some design choices to make with regards to JSON serialisation:
 
-1.  Should we include fields with `null` values?
-2.  Should decoding treat missing vs `null` differently?
-3.  How do we encode the name of a coproduct?
-4.  How do we deal with coproducts that are not `JsObject`?
+1. Should we include fields with `null` values?
+2. Should decoding treat missing vs `null` differently?
+3. How do we encode the name of a coproduct?
+4. How do we deal with coproducts that are not `JsObject`?
 
 We choose sensible defaults
 
--   do not include fields if the value is a `JsNull`.
--   handle missing fields the same as `null` values.
--   use a special field `"type"` to disambiguate coproducts using the type name.
--   put primitive values into a special field `"xvalue"`.
+- do not include fields if the value is a `JsNull`.
+- handle missing fields the same as `null` values.
+- use a special field `"type"` to disambiguate coproducts using the type name.
+- put primitive values into a special field `"xvalue"`.
 
 and let the users attach an annotation to coproducts and product fields to
 customise their formats:
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed class json extends Annotation
   object json {
     final case class nulls()          extends json
     final case class field(f: String) extends json
     final case class hint(f: String)  extends json
   }
-~~~~~~~~
+```
 
 A> Magnolia is not limited to one annotation family. This encoding is so that we
 A> can do a like-for-like comparison with Shapeless in the next section.
@@ -12126,20 +12589,22 @@ A> can do a like-for-like comparison with Shapeless in the next section.
 For example
 
 {lang="text"}
-~~~~~~~~
+
+```
   @json.field("TYPE")
   sealed abstract class Cost
   final case class Time(s: String) extends Cost
   final case class Money(@json.field("integer") i: Int) extends Cost
-~~~~~~~~
+```
 
 Start with a `JsEncoder` that handles only our sensible defaults:
 
 {lang="text"}
-~~~~~~~~
+
+```
   object JsMagnoliaEncoder {
     type Typeclass[A] = JsEncoder[A]
-  
+
     def combine[A](ctx: CaseClass[JsEncoder, A]): JsEncoder[A] = { a =>
       val empty = IList.empty[(String, JsValue)]
       val fields = ctx.parameters.foldRight(right) { (p, acc) =>
@@ -12150,7 +12615,7 @@ Start with a `JsEncoder` that handles only our sensible defaults:
       }
       JsObject(fields)
     }
-  
+
     def dispatch[A](ctx: SealedTrait[JsEncoder, A]): JsEncoder[A] = a =>
       ctx.dispatch(a) { sub =>
         val hint = "type" -> JsString(sub.typeName.short)
@@ -12159,10 +12624,10 @@ Start with a `JsEncoder` that handles only our sensible defaults:
           case other            => JsObject(IList(hint, "xvalue" -> other))
         }
       }
-  
+
     def gen[A]: JsEncoder[A] = macro Magnolia.gen[A]
   }
-~~~~~~~~
+```
 
 We can see how the Magnolia API makes it easy to access field names and
 typeclasses for each parameter.
@@ -12174,10 +12639,11 @@ align. Performance is usually the victim in the trade-off between specialisation
 and generalisation.
 
 {lang="text"}
-~~~~~~~~
+
+```
   object JsMagnoliaEncoder {
     type Typeclass[A] = JsEncoder[A]
-  
+
     def combine[A](ctx: CaseClass[JsEncoder, A]): JsEncoder[A] =
       new JsEncoder[A] {
         private val anns = ctx.parameters.map { p =>
@@ -12189,7 +12655,7 @@ and generalisation.
           }.getOrElse(p.label)
           (nulls, field)
         }.toArray
-  
+
         def toJson(a: A): JsValue = {
           val empty = IList.empty[(String, JsValue)]
           val fields = ctx.parameters.foldRight(empty) { (p, acc) =>
@@ -12202,7 +12668,7 @@ and generalisation.
           JsObject(fields)
         }
       }
-  
+
     def dispatch[A](ctx: SealedTrait[JsEncoder, A]): JsEncoder[A] =
       new JsEncoder[A] {
         private val field = ctx.annotations.collectFirst {
@@ -12217,7 +12683,7 @@ and generalisation.
           }.getOrElse("xvalue")
           (hint, xvalue)
         }.toArray
-  
+
         def toJson(a: A): JsValue = ctx.dispatch(a) { sub =>
           val (hint, xvalue) = anns(sub.index)
           sub.typeclass.toJson(sub.cast(a)) match {
@@ -12226,19 +12692,20 @@ and generalisation.
           }
         }
       }
-  
+
     def gen[A]: JsEncoder[A] = macro Magnolia.gen[A]
   }
-~~~~~~~~
+```
 
 For the decoder we use `.constructMonadic` which has a type signature similar to
 `.traverse`
 
 {lang="text"}
-~~~~~~~~
+
+```
   object JsMagnoliaDecoder {
     type Typeclass[A] = JsDecoder[A]
-  
+
     def combine[A](ctx: CaseClass[JsDecoder, A]): JsDecoder[A] = {
       case obj @ JsObject(_) =>
         ctx.constructMonadic(
@@ -12246,7 +12713,7 @@ For the decoder we use `.constructMonadic` which has a type signature similar to
         )
       case other => fail("JsObject", other)
     }
-  
+
     def dispatch[A](ctx: SealedTrait[JsDecoder, A]): JsDecoder[A] = {
       case obj @ JsObject(_) =>
         obj.get("type") match {
@@ -12261,19 +12728,20 @@ For the decoder we use `.constructMonadic` which has a type signature similar to
         }
       case other => fail("JsObject", other)
     }
-  
+
     def gen[A]: JsDecoder[A] = macro Magnolia.gen[A]
   }
-~~~~~~~~
+```
 
 Again, adding support for user preferences and default field values, along with
 some optimisations:
 
 {lang="text"}
-~~~~~~~~
+
+```
   object JsMagnoliaDecoder {
     type Typeclass[A] = JsDecoder[A]
-  
+
     def combine[A](ctx: CaseClass[JsDecoder, A]): JsDecoder[A] =
       new JsDecoder[A] {
         private val nulls = ctx.parameters.map { p =>
@@ -12281,13 +12749,13 @@ some optimisations:
             case json.nulls() => true
           }.getOrElse(false)
         }.toArray
-  
+
         private val fieldnames = ctx.parameters.map { p =>
           p.annotations.collectFirst {
             case json.field(name) => name
           }.getOrElse(p.label)
         }.toArray
-  
+
         def fromJson(j: JsValue): String \/ A = j match {
           case obj @ JsObject(_) =>
             import mercator._
@@ -12310,7 +12778,7 @@ some optimisations:
           case other => fail("JsObject", other)
         }
       }
-  
+
     def dispatch[A](ctx: SealedTrait[JsDecoder, A]): JsDecoder[A] =
       new JsDecoder[A] {
         private val subtype = ctx.subtypes.map { s =>
@@ -12326,7 +12794,7 @@ some optimisations:
             case json.field(name) => name
           }.getOrElse("xvalue")
         }.toArray
-  
+
         def fromJson(j: JsValue): String \/ A = j match {
           case obj @ JsObject(_) =>
             obj.get(typehint) match {
@@ -12343,16 +12811,17 @@ some optimisations:
           case other => fail("JsObject", other)
         }
       }
-  
+
     def gen[A]: JsDecoder[A] = macro Magnolia.gen[A]
   }
-~~~~~~~~
+```
 
 We call the `JsMagnoliaEncoder.gen` or `JsMagnoliaDecoder.gen` method from the
 companion of our data types. For example, the Google Maps API
 
 {lang="text"}
-~~~~~~~~
+
+```
   final case class Value(text: String, value: Int)
   final case class Elements(distance: Value, duration: Value, status: String)
   final case class Rows(elements: List[Elements])
@@ -12362,7 +12831,7 @@ companion of our data types. For example, the Google Maps API
     rows: List[Rows],
     status: String
   )
-  
+
   object Value {
     implicit val encoder: JsEncoder[Value] = JsMagnoliaEncoder.gen
     implicit val decoder: JsDecoder[Value] = JsMagnoliaDecoder.gen
@@ -12379,21 +12848,23 @@ companion of our data types. For example, the Google Maps API
     implicit val encoder: JsEncoder[DistanceMatrix] = JsMagnoliaEncoder.gen
     implicit val decoder: JsDecoder[DistanceMatrix] = JsMagnoliaDecoder.gen
   }
-~~~~~~~~
+```
 
 Thankfully, the `@deriving` annotation supports Magnolia! If the typeclass
 author provides a file `deriving.conf` with their jar, containing this text
 
 {lang="text"}
-~~~~~~~~
+
+```
   jsonformat.JsEncoder=jsonformat.JsMagnoliaEncoder.gen
   jsonformat.JsDecoder=jsonformat.JsMagnoliaDecoder.gen
-~~~~~~~~
+```
 
 the `deriving-macro` will call the user-provided method:
 
 {lang="text"}
-~~~~~~~~
+
+```
   @deriving(JsEncoder, JsDecoder)
   final case class Value(text: String, value: Int)
   @deriving(JsEncoder, JsDecoder)
@@ -12407,8 +12878,7 @@ the `deriving-macro` will call the user-provided method:
     rows: List[Rows],
     status: String
   )
-~~~~~~~~
-
+```
 
 ### Fully Automatic Derivation
 
@@ -12417,7 +12887,8 @@ historically known as *semi-auto* derivation, in contrast to *full-auto* which
 is when the `.gen` is made `implicit`
 
 {lang="text"}
-~~~~~~~~
+
+```
   object JsMagnoliaEncoder {
     ...
     implicit def gen[A]: JsEncoder[A] = macro Magnolia.gen[A]
@@ -12426,63 +12897,66 @@ is when the `.gen` is made `implicit`
     ...
     implicit def gen[A]: JsDecoder[A] = macro Magnolia.gen[A]
   }
-~~~~~~~~
+```
 
 Users can import these methods into their scope and get magical derivation at
 the point of use
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> final case class Value(text: String, value: Int)
   scala> import JsMagnoliaEncoder.gen
   scala> Value("hello", 1).toJson
   res = JsObject([("text","hello"),("value",1)])
-~~~~~~~~
+```
 
 This may sound tempting, as it involves the least amount of typing, but there
 are two caveats:
 
-1.  the macro is invoked at every use site, i.e. every time we call `.toJson`.
-    This slows down compilation and also produces more objects at runtime, which
-    will impact runtime performance.
-2.  unexpected things may be derived.
+1. the macro is invoked at every use site, i.e. every time we call `.toJson`.
+   This slows down compilation and also produces more objects at runtime, which
+   will impact runtime performance.
+2. unexpected things may be derived.
 
 The first caveat is self evident, but unexpected derivations manifests as
 subtle bugs. Consider what would happen for
 
 {lang="text"}
-~~~~~~~~
+
+```
   @deriving(JsEncoder)
   final case class Foo(s: Option[String])
-~~~~~~~~
+```
 
 if we forgot to provide an implicit derivation for `Option`. We might expect a
 `Foo(Some("hello"))` to look like
 
 {lang="text"}
-~~~~~~~~
+
+```
   {
     "s":"hello"
   }
-~~~~~~~~
+```
 
 But it would instead be
 
 {lang="text"}
-~~~~~~~~
+
+```
   {
     "s": {
       "type":"Some",
       "get":"hello"
     }
   }
-~~~~~~~~
+```
 
 because Magnolia derived an `Option` encoder for us.
 
 This is confusing, we would rather have the compiler tell us if we forgot
 something. Full auto is therefore not recommended.
-
 
 ## Shapeless
 
@@ -12503,29 +12977,31 @@ A> this chapter becomes too much, just skip to the next section.
 To install Shapeless, add the following to `build.sbt`
 
 {lang="text"}
-~~~~~~~~
+
+```
   libraryDependencies += "com.chuusai" %% "shapeless" % "2.3.3"
-~~~~~~~~
+```
 
 At the core of Shapeless are the `HList` and `Coproduct` data types
 
 {lang="text"}
-~~~~~~~~
+
+```
   package shapeless
-  
+
   sealed trait HList
   final case class ::[+H, +T <: HList](head: H, tail: T) extends HList
   sealed trait NNil extends HList
   case object HNil extends HNil {
     def ::[H](h: H): H :: HNil = ::(h, this)
   }
-  
+
   sealed trait Coproduct
   sealed trait :+:[+H, +T <: Coproduct] extends Coproduct
   final case class Inl[+H, +T <: Coproduct](head: H) extends :+:[H, T]
   final case class Inr[+H, +T <: Coproduct](tail: T) extends :+:[H, T]
   sealed trait CNil extends Coproduct // no implementations
-~~~~~~~~
+```
 
 which are *generic* representations of products and coproducts, respectively.
 The `sealed trait HNil` is for convenience so we never need to type `HNil.type`.
@@ -12534,7 +13010,8 @@ Shapeless has a clone of the `IsoSet` datatype, called `Generic`, which allows
 us to move between an ADT and its generic representation:
 
 {lang="text"}
-~~~~~~~~
+
+```
   trait Generic[T] {
     type Repr
     def to(t: T): Repr
@@ -12545,7 +13022,7 @@ us to move between an ADT and its generic representation:
     def apply[T](implicit G: Generic[T]): Aux[T, G.Repr] = G
     implicit def materialize[T, R]: Aux[T, R] = macro ...
   }
-~~~~~~~~
+```
 
 Many of the types in Shapeless have a type member (`Repr`) and an `.Aux` type
 alias on their companion that makes the second type visible. This allows us to
@@ -12553,49 +13030,51 @@ request the `Generic[Foo]` for a type `Foo` without having to provide the
 generic representation, which is generated by a macro.
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> import shapeless._
   scala> final case class Foo(a: String, b: Long)
          Generic[Foo].to(Foo("hello", 13L))
   res: String :: Long :: HNil = hello :: 13 :: HNil
-  
+
   scala> Generic[Foo].from("hello" :: 13L :: HNil)
   res: Foo = Foo(hello,13)
-  
+
   scala> sealed abstract class Bar
          case object Irish extends Bar
          case object English extends Bar
-  
+
   scala> Generic[Bar].to(Irish)
   res: English.type :+: Irish.type :+: CNil.type = Inl(Irish)
-  
+
   scala> Generic[Bar].from(Inl(Irish))
   res: Bar = Irish
-~~~~~~~~
+```
 
 There is a complementary `LabelledGeneric` that includes the field names
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> import shapeless._, labelled._
   scala> final case class Foo(a: String, b: Long)
-  
+
   scala> LabelledGeneric[Foo].to(Foo("hello", 13L))
   res: String with KeyTag[Symbol with Tagged[String("a")], String] ::
        Long   with KeyTag[Symbol with Tagged[String("b")],   Long] ::
        HNil =
        hello :: 13 :: HNil
-  
+
   scala> sealed abstract class Bar
          case object Irish extends Bar
          case object English extends Bar
-  
+
   scala> LabelledGeneric[Bar].to(Irish)
   res: Irish.type   with KeyTag[Symbol with Tagged[String("Irish")],     Irish.type] :+:
        English.type with KeyTag[Symbol with Tagged[String("English")], English.type] :+:
        CNil.type =
        Inl(Irish)
-~~~~~~~~
+```
 
 Note that the **value** of a `LabelledGeneric` representation is the same as the
 `Generic` representation: field names only exist in the type and are erased at
@@ -12604,9 +13083,10 @@ runtime.
 We never need to type `KeyTag` manually, we use the type alias:
 
 {lang="text"}
-~~~~~~~~
+
+```
   type FieldType[K, +V] = V with KeyTag[K, V]
-~~~~~~~~
+```
 
 If we want to access the field name from a `FieldType[K, A]`, we ask for
 implicit evidence `Witness.Aux[K]`, which allows us to access the value of `K`
@@ -12616,7 +13096,6 @@ Superficially, this is all we need to know about Shapeless to be able to derive
 a typeclass. However, things get increasingly complex, so we will proceed with
 increasingly complex examples.
 
-
 ### Example: Equal
 
 A typical pattern to follow is to extend the typeclass that we wish to derive,
@@ -12624,12 +13103,13 @@ and put the Shapeless code on its companion. This gives us an implicit scope
 that the compiler can search without requiring complex imports
 
 {lang="text"}
-~~~~~~~~
+
+```
   trait DerivedEqual[A] extends Equal[A]
   object DerivedEqual {
     ...
   }
-~~~~~~~~
+```
 
 The entry point to a Shapeless derivation is a method, `gen`, requiring two type
 parameters: the `A` that we are deriving and the `R` for its generic
@@ -12638,50 +13118,55 @@ and an instance of the `Derived` typeclass for the `R`. We begin with this
 signature and simple implementation:
 
 {lang="text"}
-~~~~~~~~
+
+```
   import shapeless._
-  
+
   object DerivedEqual {
     def gen[A, R: DerivedEqual](implicit G: Generic.Aux[A, R]): Equal[A] =
       (a1, a2) => Equal[R].equal(G.to(a1), G.to(a2))
   }
-~~~~~~~~
+```
 
 We've reduced the problem to providing an implicit `Equal[R]` for an `R` that is
 the `Generic` representation of `A`. First consider products, where `R <:
 HList`. This is the signature we want to implement:
 
 {lang="text"}
-~~~~~~~~
+
+```
   implicit def hcons[H: Equal, T <: HList: DerivedEqual]: DerivedEqual[H :: T]
-~~~~~~~~
+```
 
 because if we can implement it for a head and a tail, the compiler will be able
 to recurse on this method until it reaches the end of the list. Where we will
 need to provide an instance for the empty `HNil`
 
 {lang="text"}
-~~~~~~~~
+
+```
   implicit def hnil: DerivedEqual[HNil]
-~~~~~~~~
+```
 
 We implement these methods
 
 {lang="text"}
-~~~~~~~~
+
+```
   implicit def hcons[H: Equal, T <: HList: DerivedEqual]: DerivedEqual[H :: T] =
     (h1, h2) => Equal[H].equal(h1.head, h2.head) && Equal[T].equal(h1.tail, h2.tail)
-  
+
   implicit val hnil: DerivedEqual[HNil] = (_, _) => true
-~~~~~~~~
+```
 
 and for coproducts we want to implement these signatures
 
 {lang="text"}
-~~~~~~~~
+
+```
   implicit def ccons[H: Equal, T <: Coproduct: DerivedEqual]: DerivedEqual[H :+: T]
   implicit def cnil: DerivedEqual[CNil]
-~~~~~~~~
+```
 
 A> Scalaz and Shapeless share many type names, when mixing them we often need to
 A> exclude certain elements from the import, e.g.
@@ -12697,21 +13182,23 @@ only in contravariant position, but the compiler doesn't know that so we have to
 provide a stub:
 
 {lang="text"}
-~~~~~~~~
+
+```
   implicit val cnil: DerivedEqual[CNil] = (_, _) => sys.error("impossible")
-~~~~~~~~
+```
 
 For the coproduct case we can only compare two things if they align, which is
 when they are both `Inl` or `Inr`
 
 {lang="text"}
-~~~~~~~~
+
+```
   implicit def ccons[H: Equal, T <: Coproduct: DerivedEqual]: DerivedEqual[H :+: T] = {
     case (Inl(c1), Inl(c2)) => Equal[H].equal(c1, c2)
     case (Inr(c1), Inr(c2)) => Equal[T].equal(c1, c2)
     case _                  => false
   }
-~~~~~~~~
+```
 
 It is noteworthy that our methods align with the concept of `conquer` (`hnil`),
 `divide2` (`hlist`) and `alt2` (`coproduct`)! However, we don't get any of the
@@ -12721,17 +13208,19 @@ writing tests for this code.
 So let's test this thing with a simple ADT
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed abstract class Foo
   final case class Bar(s: String)          extends Foo
   final case class Faz(b: Boolean, i: Int) extends Foo
   final case object Baz                    extends Foo
-~~~~~~~~
+```
 
 We need to provide instances on the companions:
 
 {lang="text"}
-~~~~~~~~
+
+```
   object Foo {
     implicit val equal: Equal[Foo] = DerivedEqual.gen
   }
@@ -12744,19 +13233,20 @@ We need to provide instances on the companions:
   final case object Baz extends Foo {
     implicit val equal: Equal[Baz.type] = DerivedEqual.gen
   }
-~~~~~~~~
+```
 
 But it doesn't compile
 
 {lang="text"}
-~~~~~~~~
+
+```
   [error] shapeless.scala:41:38: ambiguous implicit values:
   [error]  both value hnil in object DerivedEqual of type => DerivedEqual[HNil]
   [error]  and value cnil in object DerivedEqual of type => DerivedEqual[CNil]
   [error]  match expected type DerivedEqual[R]
   [error]     : Equal[Baz.type] = DerivedEqual.gen
   [error]                                      ^
-~~~~~~~~
+```
 
 Welcome to Shapeless compilation errors!
 
@@ -12765,20 +13255,22 @@ unable to work out what `R` is, and gets caught thinking it is something else.
 We need to provide the explicit type parameters when calling `gen`, e.g.
 
 {lang="text"}
-~~~~~~~~
+
+```
   implicit val equal: Equal[Baz.type] = DerivedEqual.gen[Baz.type, HNil]
-~~~~~~~~
+```
 
 or we can use the `Generic` macro to help us and let the compiler infer the generic representation
 
 {lang="text"}
-~~~~~~~~
+
+```
   final case object Baz extends Foo {
     implicit val generic                = Generic[Baz.type]
     implicit val equal: Equal[Baz.type] = DerivedEqual.gen[Baz.type, generic.Repr]
   }
   ...
-~~~~~~~~
+```
 
 A> At this point, ignore any red squigglies and only trust the compiler. This is
 A> the point where Shapeless departs from IDE support.
@@ -12786,16 +13278,18 @@ A> the point where Shapeless departs from IDE support.
 The reason why this fixes the problem is because the type signature
 
 {lang="text"}
-~~~~~~~~
+
+```
   def gen[A, R: DerivedEqual](implicit G: Generic.Aux[A, R]): Equal[A]
-~~~~~~~~
+```
 
 desugars into
 
 {lang="text"}
-~~~~~~~~
+
+```
   def gen[A, R](implicit R: DerivedEqual[R], G: Generic.Aux[A, R]): Equal[A]
-~~~~~~~~
+```
 
 The Scala compiler solves type constraints left to right, so it finds many
 different solutions to `DerivedEqual[R]` before constraining it with the
@@ -12813,19 +13307,21 @@ entry in `deriving.conf` (assuming we want to override the `scalaz-deriving`
 implementation)
 
 {lang="text"}
-~~~~~~~~
+
+```
   scalaz.Equal=fommil.DerivedEqual.gen
-~~~~~~~~
+```
 
 and write
 
 {lang="text"}
-~~~~~~~~
+
+```
   @deriving(Equal) sealed abstract class Foo
   @deriving(Equal) final case class Bar(s: String)          extends Foo
   @deriving(Equal) final case class Faz(b: Boolean, i: Int) extends Foo
   @deriving(Equal) final case object Baz
-~~~~~~~~
+```
 
 But replacing the `scalaz-deriving` version means that compile times get slower.
 This is because the compiler is solving `N` implicit searches for each product
@@ -12838,25 +13334,27 @@ just the top member of an ADT, but for Shapeless we must add it to all entries.
 However, this implementation still has a bug: it fails for recursive types **at runtime**, e.g.
 
 {lang="text"}
-~~~~~~~~
+
+```
   @deriving(Equal) sealed trait ATree
   @deriving(Equal) final case class Leaf(value: String)               extends ATree
   @deriving(Equal) final case class Branch(left: ATree, right: ATree) extends ATree
-~~~~~~~~
+```
 
 {lang="text"}
-~~~~~~~~
+
+```
   scala> val leaf1: Leaf    = Leaf("hello")
          val leaf2: Leaf    = Leaf("goodbye")
          val branch: Branch = Branch(leaf1, leaf2)
          val tree1: ATree   = Branch(leaf1, branch)
          val tree2: ATree   = Branch(leaf2, branch)
-  
+
   scala> assert(tree1 /== tree2)
   [error] java.lang.NullPointerException
   [error] at DerivedEqual$.shapes$DerivedEqual$$$anonfun$hcons$1(shapeless.scala:16)
           ...
-~~~~~~~~
+```
 
 The reason why this happens is because `Equal[Tree]` depends on the
 `Equal[Branch]`, which depends on the `Equal[Tree]`. Recursion and BANG!
@@ -12873,7 +13371,8 @@ the `H` instances.
 It is best to depart from context bounds and SAM types entirely at this point:
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed trait DerivedEqual[A] extends Equal[A]
   object DerivedEqual {
     def gen[A, R](
@@ -12883,7 +13382,7 @@ It is best to depart from context bounds and SAM types entirely at this point:
       def equal(a1: A, a2: A) =
         quick(a1, a2) || R.value.value.equal(G.to(a1), G.to(a2))
     }
-  
+
     implicit def hcons[H, T <: HList](
       implicit H: Lazy[Equal[H]],
       T: DerivedEqual[T]
@@ -12892,11 +13391,11 @@ It is best to depart from context bounds and SAM types entirely at this point:
         (quick(ht1.head, ht2.head) || H.value.equal(ht1.head, ht2.head)) &&
           T.equal(ht1.tail, ht2.tail)
     }
-  
+
     implicit val hnil: DerivedEqual[HNil] = new DerivedEqual[HNil] {
       def equal(@unused h1: HNil, @unused h2: HNil) = true
     }
-  
+
     implicit def ccons[H, T <: Coproduct](
       implicit H: Lazy[Equal[H]],
       T: DerivedEqual[T]
@@ -12907,15 +13406,15 @@ It is best to depart from context bounds and SAM types entirely at this point:
         case _                  => false
       }
     }
-  
+
     implicit val cnil: DerivedEqual[CNil] = new DerivedEqual[CNil] {
       def equal(@unused c1: CNil, @unused c2: CNil) = sys.error("impossible")
     }
-  
+
     @inline private final def quick(a: Any, b: Any): Boolean =
       a.asInstanceOf[AnyRef].eq(b.asInstanceOf[AnyRef])
   }
-~~~~~~~~
+```
 
 While we were at it, we optimised using the `quick` shortcut from
 `scalaz-deriving`.
@@ -12923,12 +13422,12 @@ While we were at it, we optimised using the `quick` shortcut from
 We can now call
 
 {lang="text"}
-~~~~~~~~
+
+```
   assert(tree1 /== tree2)
-~~~~~~~~
+```
 
 without a runtime exception.
-
 
 ### Example: `Default`
 
@@ -12938,7 +13437,8 @@ and must provide a value for the `CNil` case as it corresponds to the case where
 no coproduct is able to provide a value.
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed trait DerivedDefault[A] extends Default[A]
   object DerivedDefault {
     def gen[A, R](
@@ -12947,7 +13447,7 @@ no coproduct is able to provide a value.
     ): Default[A] = new Default[A] {
       def default = R.value.value.default.map(G.from)
     }
-  
+
     implicit def hcons[H, T <: HList](
       implicit H: Lazy[Default[H]],
       T: DerivedDefault[T]
@@ -12958,23 +13458,23 @@ no coproduct is able to provide a value.
           tail <- T.default
         } yield head :: tail
     }
-  
+
     implicit val hnil: DerivedDefault[HNil] = new DerivedDefault[HNil] {
       def default = HNil.right
     }
-  
+
     implicit def ccons[H, T <: Coproduct](
       implicit H: Lazy[Default[H]],
       T: DerivedDefault[T]
     ): DerivedDefault[H :+: T] = new DerivedDefault[H :+: T] {
       def default = H.value.default.map(Inl(_)).orElse(T.default.map(Inr(_)))
     }
-  
+
     implicit val cnil: DerivedDefault[CNil] = new DerivedDefault[CNil] {
       def default = "not a valid coproduct".left
     }
   }
-~~~~~~~~
+```
 
 Much as we could draw an analogy between `Equal` and `Decidable`, we can see the
 relationship to `Alt` in `.point` (`hnil`), `.apply2` (`.hcons`) and `.altly2`
@@ -12983,14 +13483,13 @@ relationship to `Alt` in `.point` (`hnil`), `.apply2` (`.hcons`) and `.altly2`
 There is little to be learned from an example like `Semigroup`, so we will skip
 to encoders and decoders.
 
-
 ### Example: `JsEncoder`
 
 To be able to reproduce our Magnolia JSON encoder, we must be able to access:
 
-1.  field names and class names
-2.  annotations for user preferences
-3.  default values on a `case class`
+1. field names and class names
+2. annotations for user preferences
+3. default values on a `case class`
 
 We will begin by creating an encoder that handles only the sensible defaults.
 
@@ -13003,9 +13502,10 @@ All of our methods are going to return `JsObject`, so rather than returning a
 type signature to `JsEncoder`.
 
 {lang="text"}
-~~~~~~~~
+
+```
   import shapeless._, labelled._
-  
+
   sealed trait DerivedJsEncoder[R] {
     def toJsFields(r: R): IList[(String, JsValue)]
   }
@@ -13016,7 +13516,7 @@ type signature to `JsEncoder`.
     ): JsEncoder[A] = new JsEncoder[A] {
       def toJson(a: A) = JsObject(R.value.value.toJsFields(G.to(a)))
     }
-  
+
     implicit def hcons[K <: Symbol, H, T <: HList](
       implicit
       K: Witness.Aux[K],
@@ -13035,12 +13535,12 @@ type signature to `JsEncoder`.
               }
           }
       }
-  
+
     implicit val hnil: DerivedJsEncoder[HNil] =
       new DerivedJsEncoder[HNil] {
         def toJsFields(h: HNil) = IList.empty
       }
-  
+
     implicit def ccons[K <: Symbol, H, T <: Coproduct](
       implicit
       K: Witness.Aux[K],
@@ -13055,18 +13555,18 @@ type signature to `JsEncoder`.
               case JsObject(fields) => hint :: fields
               case v                => IList.single("xvalue" -> v)
             }
-  
+
           case Inr(tail) => T.toJsFields(tail)
         }
       }
-  
+
     implicit val cnil: DerivedJsEncoder[CNil] =
       new DerivedJsEncoder[CNil] {
         def toJsFields(c: CNil) = sys.error("impossible")
       }
-  
+
   }
-~~~~~~~~
+```
 
 A> A pattern has emerged in many Shapeless derivation libraries that introduce
 A> "hints" with a default `implicit`
@@ -13099,20 +13599,22 @@ change our three annotations into one containing all the customisation
 parameters:
 
 {lang="text"}
-~~~~~~~~
+
+```
   case class json(
     nulls: Boolean,
     field: Option[String],
     hint: Option[String]
   ) extends Annotation
-~~~~~~~~
+```
 
 All users of the annotation must provide all three values since default values
 and convenience methods are not available to annotation constructors. We can
 write custom extractors so we don't have to change our Magnolia code
 
 {lang="text"}
-~~~~~~~~
+
+```
   object json {
     object nulls {
       def unapply(j: json): Boolean = j.nulls
@@ -13124,7 +13626,7 @@ write custom extractors so we don't have to change our Magnolia code
       def unapply(j: json): Option[String] = j.hint
     }
   }
-~~~~~~~~
+```
 
 We can request `Annotation[json, A]` for a `case class` or `sealed trait` to get access to the annotation, but we must write an `hcons` and a `ccons` dealing with both cases because the evidence will not be generated if the annotation is not present. We therefore have to introduce a lower priority implicit scope and put the "no annotation" evidence there.
 
@@ -13148,7 +13650,8 @@ Note that the evidence for `J` is listed before `R`. This is important, since
 the compiler must first fix the type of `J` before it can solve for `R`.
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed trait DerivedJsEncoder[A, R, J <: HList] {
     def toJsFields(r: R, anns: J): IList[(String, JsValue)]
   }
@@ -13161,12 +13664,12 @@ the compiler must first fix the type of `J` before it can solve for `R`.
     ): JsEncoder[A] = new JsEncoder[A] {
       def toJson(a: A) = JsObject(R.value.value.toJsFields(G.to(a), J()))
     }
-  
+
     implicit def hnil[A]: DerivedJsEncoder[A, HNil, HNil] =
       new DerivedJsEncoder[A, HNil, HNil] {
         def toJsFields(h: HNil, a: HNil) = IList.empty
       }
-  
+
     implicit def cnil[A]: DerivedJsEncoder[A, CNil, HNil] =
       new DerivedJsEncoder[A, CNil, HNil] {
         def toJsFields(c: CNil, a: HNil) = sys.error("impossible")
@@ -13191,7 +13694,7 @@ the compiler must first fix the type of `J` before it can solve for `R`.
               }
           }
       }
-  
+
     implicit def ccons[A, K <: Symbol, H, T <: Coproduct, J <: HList](
       implicit
       K: Witness.Aux[K],
@@ -13211,7 +13714,7 @@ the compiler must first fix the type of `J` before it can solve for `R`.
           }
       }
   }
-~~~~~~~~
+```
 
 Now we can add the type signatures for the six new methods, covering all the
 possibilities of where the annotation can be. Note that we only support **one**
@@ -13223,7 +13726,8 @@ We're now running out of names for things, so we will arbitrarily call it
 an annotation on a field:
 
 {lang="text"}
-~~~~~~~~
+
+```
   object DerivedJsEncoder extends DerivedJsEncoder1 {
     ...
     implicit def hconsAnnotated[A, K <: Symbol, H, T <: HList, J <: HList](
@@ -13233,7 +13737,7 @@ an annotation on a field:
       H: Lazy[JsEncoder[H]],
       T: DerivedJsEncoder[A, T, J]
     ): DerivedJsEncoder[A, FieldType[K, H] :: T, None.type :: J]
-  
+
     implicit def cconsAnnotated[A, K <: Symbol, H, T <: Coproduct, J <: HList](
       implicit
       A: Annotation[json, A],
@@ -13241,7 +13745,7 @@ an annotation on a field:
       H: Lazy[JsEncoder[H]],
       T: DerivedJsEncoder[A, T, J]
     ): DerivedJsEncoder[A, FieldType[K, H] :+: T, None.type :: J]
-  
+
     implicit def hconsAnnotatedCustom[A, K <: Symbol, H, T <: HList, J <: HList](
       implicit
       A: Annotation[json, A],
@@ -13249,7 +13753,7 @@ an annotation on a field:
       H: Lazy[JsEncoder[H]],
       T: DerivedJsEncoder[A, T, J]
     ): DerivedJsEncoder[A, FieldType[K, H] :: T, Some[json] :: J]
-  
+
     implicit def cconsAnnotatedCustom[A, K <: Symbol, H, T <: Coproduct, J <: HList](
       implicit
       A: Annotation[json, A],
@@ -13266,7 +13770,7 @@ an annotation on a field:
       H: Lazy[JsEncoder[H]],
       T: DerivedJsEncoder[A, T, J]
     ): DerivedJsEncoder[A, FieldType[K, H] :: T, Some[json] :: J] = ???
-  
+
     implicit def cconsCustom[A, K <: Symbol, H, T <: Coproduct, J <: HList](
       implicit
       K: Witness.Aux[K],
@@ -13274,7 +13778,7 @@ an annotation on a field:
       T: DerivedJsEncoder[A, T, J]
     ): DerivedJsEncoder[A, FieldType[K, H] :+: T, Some[json] :: J]
   }
-~~~~~~~~
+```
 
 We don't actually need `.hconsAnnotated` or `.hconsAnnotatedCustom` for
 anything, since an annotation on a `case class` does not mean anything to the
@@ -13284,7 +13788,8 @@ delete two methods.
 `.cconsAnnotated` and `.cconsAnnotatedCustom` can be defined as
 
 {lang="text"}
-~~~~~~~~
+
+```
   new DerivedJsEncoder[A, FieldType[K, H] :+: T, None.type :: J] {
     private val hint = A().field.getOrElse("type") -> JsString(K.value.name)
     def toJsFields(ht: FieldType[K, H] :+: T, anns: None.type :: J) = ht match {
@@ -13296,12 +13801,13 @@ delete two methods.
       case Inr(tail) => T.toJsFields(tail, anns.tail)
     }
   }
-~~~~~~~~
+```
 
 and
 
 {lang="text"}
-~~~~~~~~
+
+```
   new DerivedJsEncoder[A, FieldType[K, H] :+: T, Some[json] :: J] {
     private val hintfield = A().field.getOrElse("type")
     def toJsFields(ht: FieldType[K, H] :+: T, anns: Some[json] :: J) = ht match {
@@ -13318,7 +13824,7 @@ and
       case Inr(tail) => T.toJsFields(tail, anns.tail)
     }
   }
-~~~~~~~~
+```
 
 The use of `.head` and `.get` may be concerned but recall that the types here
 are `::` and `Some` meaning that these methods are total and safe to use.
@@ -13326,7 +13832,8 @@ are `::` and `Some` meaning that these methods are total and safe to use.
 `.hconsCustom` and `.cconsCustom` are written
 
 {lang="text"}
-~~~~~~~~
+
+```
   new DerivedJsEncoder[A, FieldType[K, H] :: T, Some[json] :: J] {
     def toJsFields(ht: FieldType[K, H] :: T, anns: Some[json] :: J) = ht match {
       case head :: tail =>
@@ -13340,12 +13847,13 @@ are `::` and `Some` meaning that these methods are total and safe to use.
         }
     }
   }
-~~~~~~~~
+```
 
 and
 
 {lang="text"}
-~~~~~~~~
+
+```
   new DerivedJsEncoder[A, FieldType[K, H] :+: T, Some[json] :: J] {
     def toJsFields(ht: FieldType[K, H] :+: T, anns: Some[json] :: J) = ht match {
       case Inl(head) =>
@@ -13361,7 +13869,7 @@ and
       case Inr(tail) => T.toJsFields(tail, anns.tail)
     }
   }
-~~~~~~~~
+```
 
 Obviously, there is a lot of boilerplate, but looking closely one can see that
 each method is implemented as efficiently as possible with the information it
@@ -13382,7 +13890,8 @@ tags so we add the following derivation rules to the companions of our encoder
 and decoder
 
 {lang="text"}
-~~~~~~~~
+
+```
   object JsEncoder {
     ...
     implicit def tagged[A: JsEncoder, Z]: JsEncoder[A @@ Z] =
@@ -13393,40 +13902,43 @@ and decoder
     implicit def tagged[A: JsDecoder, Z]: JsDecoder[A @@ Z] =
       JsDecoder[A].map(Tag(_))
   }
-~~~~~~~~
+```
 
 We would then expect to be able to derive a `JsDecoder` for something like our
 `TradeTemplate` from Chapter 5
 
 {lang="text"}
-~~~~~~~~
+
+```
   final case class TradeTemplate(
     otc: Option[Boolean] @@ Tags.Last
   )
   object TradeTemplate {
     implicit val encoder: JsEncoder[TradeTemplate] = DerivedJsEncoder.gen
   }
-~~~~~~~~
+```
 
 But we instead get a compiler error
 
 {lang="text"}
-~~~~~~~~
+
+```
   [error] could not find implicit value for parameter G: LabelledGeneric.Aux[A,R]
   [error]   implicit val encoder: JsEncoder[TradeTemplate] = DerivedJsEncoder.gen
   [error]                                                                     ^
-~~~~~~~~
+```
 
 The error message is as helpful as always. The workaround is to introduce evidence for `H @@ Z` on the lower priority implicit scope, and then just call the code that the compiler should have found in the first place:
 
 {lang="text"}
-~~~~~~~~
+
+```
   object DerivedJsEncoder extends DerivedJsEncoder1 with DerivedJsEncoder2 {
     ...
   }
   private[jsonformat] trait DerivedJsEncoder2 {
     this: DerivedJsEncoder.type =>
-  
+
     // WORKAROUND https://github.com/milessabin/shapeless/issues/309
     implicit def hconsTagged[A, K <: Symbol, H, Z, T <: HList, J <: HList](
       implicit
@@ -13434,7 +13946,7 @@ The error message is as helpful as always. The workaround is to introduce eviden
       H: Lazy[JsEncoder[H @@ Z]],
       T: DerivedJsEncoder[A, T, J]
     ): DerivedJsEncoder[A, FieldType[K, H @@ Z] :: T, None.type :: J] = hcons(K, H, T)
-  
+
     implicit def hconsCustomTagged[A, K <: Symbol, H, Z, T <: HList, J <: HList](
       implicit
       K: Witness.Aux[K],
@@ -13442,10 +13954,9 @@ The error message is as helpful as always. The workaround is to introduce eviden
       T: DerivedJsEncoder[A, T, J]
     ): DerivedJsEncoder[A, FieldType[K, H @@ Z] :: T, Some[json] :: J] = hconsCustom(K, H, T)
   }
-~~~~~~~~
+```
 
 Thankfully, we only need to consider products, since coproducts cannot be tagged.
-
 
 ### `JsDecoder`
 
@@ -13454,7 +13965,8 @@ construct an instance of a `FieldType[K, H]` with the helper `field[K](h: H)`.
 Supporting only the sensible defaults means we write:
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed trait DerivedJsDecoder[A] {
     def fromJsObject(j: JsObject): String \/ A
   }
@@ -13468,7 +13980,7 @@ Supporting only the sensible defaults means we write:
         case other           => fail("JsObject", other)
       }
     }
-  
+
     implicit def hcons[K <: Symbol, H, T <: HList](
       implicit
       K: Witness.Aux[K],
@@ -13485,12 +13997,12 @@ Supporting only the sensible defaults means we write:
           } yield field[K](head) :: tail
         }
       }
-  
+
     implicit val hnil: DerivedJsDecoder[HNil] = new DerivedJsDecoder[HNil] {
       private val nil               = HNil.right[String]
       def fromJsObject(j: JsObject) = nil
     }
-  
+
     implicit def ccons[K <: Symbol, H, T <: Coproduct](
       implicit
       K: Witness.Aux[K],
@@ -13510,12 +14022,12 @@ Supporting only the sensible defaults means we write:
           } else
             T.fromJsObject(j).map(Inr(_))
       }
-  
+
     implicit val cnil: DerivedJsDecoder[CNil] = new DerivedJsDecoder[CNil] {
       def fromJsObject(j: JsObject) = fail(s"JsObject with 'type' field", j)
     }
   }
-~~~~~~~~
+```
 
 Adding user preferences via annotations follows the same route as
 `DerivedJsEncoder` and is mechanical, so left as an exercise to the reader.
@@ -13530,7 +14042,8 @@ attention on the `DerivedProductJsDecoder`, and while we are at it we will
 use a `Map` for faster field lookup:
 
 {lang="text"}
-~~~~~~~~
+
+```
   sealed trait DerivedProductJsDecoder[A, R, J <: HList, D <: HList] {
     private[jsonformat] def fromJsObject(
       j: Map[String, JsValue],
@@ -13538,7 +14051,7 @@ use a `Map` for faster field lookup:
       defaults: D
     ): String \/ R
   }
-~~~~~~~~
+```
 
 We can request evidence of default values with `Default.Aux[A, D]` and duplicate
 all the methods to deal with the case where we do and do not have a default
@@ -13546,7 +14059,8 @@ value. However, Shapeless is merciful (for once) and provides
 `Default.AsOptions.Aux[A, D]` letting us handle defaults at runtime.
 
 {lang="text"}
-~~~~~~~~
+
+```
   object DerivedProductJsDecoder {
     def gen[A, R, J <: HList, D <: HList](
       implicit G: LabelledGeneric.Aux[A, R],
@@ -13562,13 +14076,14 @@ value. However, Shapeless is merciful (for once) and provides
     }
     ...
   }
-~~~~~~~~
+```
 
 We must move the `.hcons` and `.hnil` methods onto the companion of the new
 sealed typeclass, which can handle default values
 
 {lang="text"}
-~~~~~~~~
+
+```
   object DerivedProductJsDecoder {
     ...
       implicit def hnil[A]: DerivedProductJsDecoder[A, HNil, HNil, HNil] =
@@ -13576,7 +14091,7 @@ sealed typeclass, which can handle default values
         private val nil = HNil.right[String]
         def fromJsObject(j: StringyMap[JsValue], a: HNil, defaults: HNil) = nil
       }
-  
+
     implicit def hcons[A, K <: Symbol, H, T <: HList, J <: HList, D <: HList](
       implicit
       K: Witness.Aux[K],
@@ -13604,7 +14119,7 @@ sealed typeclass, which can handle default values
       }
     ...
   }
-~~~~~~~~
+```
 
 We can no longer use `@deriving` for products and coproducts: there can only be
 one entry in the `deriving.conf` file.
@@ -13612,13 +14127,14 @@ one entry in the `deriving.conf` file.
 Oh, and don't forget to add `@@` support
 
 {lang="text"}
-~~~~~~~~
+
+```
   object DerivedProductJsDecoder extends DerivedProductJsDecoder1 {
     ...
   }
   private[jsonformat] trait DerivedProductJsDecoder2 {
     this: DerivedProductJsDecoder.type =>
-  
+
     implicit def hconsTagged[
       A, K <: Symbol, H, Z, T <: HList, J <: HList, D <: HList
     ](
@@ -13632,7 +14148,7 @@ Oh, and don't forget to add `@@` support
       None.type :: J,
       Option[H @@ Z] :: D
     ] = hcons(K, H, T)
-  
+
     implicit def hconsCustomTagged[
       A, K <: Symbol, H, Z, T <: HList, J <: HList, D <: HList
     ](
@@ -13647,8 +14163,7 @@ Oh, and don't forget to add `@@` support
       Option[H @@ Z] :: D
     ] = hconsCustomTagged(K, H, T)
   }
-~~~~~~~~
-
+```
 
 ### Complicated Derivations
 
@@ -13657,10 +14172,11 @@ Shapeless allows for a lot more kinds of derivations than are possible with
 not possible with Magnolia, consider this XML model from [`xmlformat`](https://github.com/scalaz/scalaz-deriving/tree/master/examples/xmlformat)
 
 {lang="text"}
-~~~~~~~~
+
+```
   @deriving(Equal, Show, Arbitrary)
   sealed abstract class XNode
-  
+
   @deriving(Equal, Show, Arbitrary)
   final case class XTag(
     name: String,
@@ -13668,18 +14184,18 @@ not possible with Magnolia, consider this XML model from [`xmlformat`](https://g
     children: IList[XTag],
     body: Maybe[XString]
   )
-  
+
   @deriving(Equal, Show, Arbitrary)
   final case class XAttr(name: String, value: XString)
-  
+
   @deriving(Show)
   @xderiving(Equal, Monoid, Arbitrary)
   final case class XChildren(tree: IList[XTag]) extends XNode
-  
+
   @deriving(Show)
   @xderiving(Equal, Semigroup, Arbitrary)
   final case class XString(text: String) extends XNode
-~~~~~~~~
+```
 
 Given the nature of XML it makes sense to have separate encoder / decoder pairs
 for `XChildren` and `XString` content. We could provide a derivation for the
@@ -13694,7 +14210,6 @@ A> brackets instead of curlies. However, an attempt to write a round trip conver
 A> between `XNode` and `JsValue` should convince us that JSON and XML are different
 A> species, with conversions only possible on a case-by-case basis.
 
-
 ### Example: `UrlQueryWriter`
 
 Along similar lines as `xmlformat`, our `drone-dynamic-agents` application could
@@ -13703,7 +14218,8 @@ built out of `UrlEncodedWriter` instances for each field entry. It does not
 support coproducts:
 
 {lang="text"}
-~~~~~~~~
+
+```
   @typeclass trait UrlQueryWriter[A] {
     def toUrlQuery(a: A): UrlQuery
   }
@@ -13716,7 +14232,7 @@ support coproducts:
     ): UrlQueryWriter[T] = { t =>
       CR.value.value.toUrlQuery(G.to(t))
     }
-  
+
     implicit val hnil: DerivedUrlQueryWriter[HNil] = { _ =>
       UrlQuery(IList.empty)
     }
@@ -13732,7 +14248,7 @@ support coproducts:
         UrlQuery(first :: rest.params)
     }
   }
-~~~~~~~~
+```
 
 It is reasonable to ask if these 30 lines are actually an improvement over the 8
 lines for the 2 manual instances our application needs: a decision to be taken
@@ -13741,7 +14257,8 @@ on a case by case basis.
 For completeness, the `UrlEncodedWriter` derivation can be written with Magnolia
 
 {lang="text"}
-~~~~~~~~
+
+```
   object UrlEncodedWriterMagnolia {
     type Typeclass[a] = UrlEncodedWriter[a]
     def combine[A](ctx: CaseClass[UrlEncodedWriter, A]) = a =>
@@ -13750,8 +14267,7 @@ For completeness, the `UrlEncodedWriter` derivation can be written with Magnolia
       }.toList.intercalate("&"))
     def gen[A]: UrlEncodedWriter[A] = macro Magnolia.gen[A]
   }
-~~~~~~~~
-
+```
 
 ### The Dark Side of Derivation
 
@@ -13774,33 +14290,36 @@ instances on companions, creating a source of typeclass decoherence. For
 example, consider this code if our `.gen` were implicit
 
 {lang="text"}
-~~~~~~~~
+
+```
   import DerivedJsEncoder._
-  
+
   @xderiving(JsEncoder)
   final case class Foo(s: String)
   final case class Bar(foo: Foo)
-~~~~~~~~
+```
 
 We might expect the full-auto encoded form of `Bar("hello")` to look like
 
 {lang="text"}
-~~~~~~~~
+
+```
   {
     "foo":"hello"
   }
-~~~~~~~~
+```
 
 because we have used `xderiving` for `Foo`. But it can instead be
 
 {lang="text"}
-~~~~~~~~
+
+```
   {
     "foo": {
       "s":"hello"
     }
   }
-~~~~~~~~
+```
 
 Worse yet is when implicit methods are added to the companion of the typeclass,
 meaning that the typeclass is always derived at the point of use and users are
@@ -13814,12 +14333,10 @@ Everything is much simpler in the light side, where `implicit` is only used for
 coherent, globally unique, typeclasses. Fear of boilerplate is the path to the
 dark side. Fear leads to anger. Anger leads to hate. Hate leads to suffering.
 
-
 ## Performance
 
 There is no silver bullet when it comes to typeclass derivation. An axis to
 consider is performance: both at compiletime and runtime.
-
 
 #### Compile Times
 
@@ -13829,10 +14346,11 @@ To investigate compilation issues, we can profile our applications with the
 `scalac-profiling` plugin
 
 {lang="text"}
-~~~~~~~~
+
+```
   addCompilerPlugin("ch.epfl.scala" %% "scalac-profiling" % "1.0.0")
   scalacOptions ++= Seq("-Ystatistics:typer", "-P:scalac-profiling:no-profiledb")
-~~~~~~~~
+```
 
 It produces output that can generate a *flame graph*.
 
@@ -13848,7 +14366,6 @@ but the Shapeless computations dominate.
 And this is when it works. If there is a problem with a shapeless derivation,
 the compiler can get stuck in an infinite loop and must be killed.
 
-
 #### Runtime Performance
 
 If we move to runtime performance, the answer is always *it depends*.
@@ -13860,81 +14377,84 @@ The `jsonformat` library uses the [Java Microbenchmark Harness (JMH)](http://ope
 that map to GeoJSON, Google Maps, and Twitter, contributed by Andriy
 Plokhotnyuk. There are three tests per model:
 
--   encoding the `ADT` to a `JsValue`
--   a successful decoding of the same `JsValue` back into an ADT
--   a failure decoding of a `JsValue` with a data error
+- encoding the `ADT` to a `JsValue`
+- a successful decoding of the same `JsValue` back into an ADT
+- a failure decoding of a `JsValue` with a data error
 
 applied to the following implementations:
 
--   Magnolia
--   Shapeless
--   manually written
+- Magnolia
+- Shapeless
+- manually written
 
 with the equivalent optimisations in each. The results are in operations per
 second (higher is better), on a powerful desktop computer, using a single
 thread:
 
 {lang="text"}
-~~~~~~~~
+
+```
   > jsonformat/jmh:run -i 5 -wi 5 -f1 -t1 -w1 -r1 .*encode*
   Benchmark                                 Mode  Cnt       Score      Error  Units
-  
+
   GeoJSONBenchmarks.encodeMagnolia         thrpt    5   70527.223 ±  546.991  ops/s
   GeoJSONBenchmarks.encodeShapeless        thrpt    5   65925.215 ±  309.623  ops/s
   GeoJSONBenchmarks.encodeManual           thrpt    5   96435.691 ±  334.652  ops/s
-  
+
   GoogleMapsAPIBenchmarks.encodeMagnolia   thrpt    5   73107.747 ±  439.803  ops/s
   GoogleMapsAPIBenchmarks.encodeShapeless  thrpt    5   53867.845 ±  510.888  ops/s
   GoogleMapsAPIBenchmarks.encodeManual     thrpt    5  127608.402 ± 1584.038  ops/s
-  
+
   TwitterAPIBenchmarks.encodeMagnolia      thrpt    5  133425.164 ± 1281.331  ops/s
   TwitterAPIBenchmarks.encodeShapeless     thrpt    5   84233.065 ±  352.611  ops/s
   TwitterAPIBenchmarks.encodeManual        thrpt    5  281606.574 ± 1975.873  ops/s
-~~~~~~~~
+```
 
 We see that the manual implementations are in the lead, followed by Magnolia,
 with Shapeless from 30% to 70% the performance of the manual instances. Now for
 decoding
 
 {lang="text"}
-~~~~~~~~
+
+```
   > jsonformat/jmh:run -i 5 -wi 5 -f1 -t1 -w1 -r1 .*decode.*Success
   Benchmark                                        Mode  Cnt       Score      Error  Units
-  
+
   GeoJSONBenchmarks.decodeMagnoliaSuccess         thrpt    5   40850.270 ±  201.457  ops/s
   GeoJSONBenchmarks.decodeShapelessSuccess        thrpt    5   41173.199 ±  373.048  ops/s
   GeoJSONBenchmarks.decodeManualSuccess           thrpt    5  110961.246 ±  468.384  ops/s
-  
+
   GoogleMapsAPIBenchmarks.decodeMagnoliaSuccess   thrpt    5   44577.796 ±  457.861  ops/s
   GoogleMapsAPIBenchmarks.decodeShapelessSuccess  thrpt    5   31649.792 ±  861.169  ops/s
   GoogleMapsAPIBenchmarks.decodeManualSuccess     thrpt    5   56250.913 ±  394.105  ops/s
-  
+
   TwitterAPIBenchmarks.decodeMagnoliaSuccess      thrpt    5   55868.832 ± 1106.543  ops/s
   TwitterAPIBenchmarks.decodeShapelessSuccess     thrpt    5   47711.161 ±  356.911  ops/s
   TwitterAPIBenchmarks.decodeManualSuccess        thrpt    5   71962.394 ±  465.752  ops/s
-~~~~~~~~
+```
 
 This is a tighter race for second place, with Shapeless and Magnolia keeping
 pace. Finally, decoding from a `JsValue` that contains invalid data (in an
 intentionally awkward position)
 
 {lang="text"}
-~~~~~~~~
+
+```
   > jsonformat/jmh:run -i 5 -wi 5 -f1 -t1 -w1 -r1 .*decode.*Error
   Benchmark                                      Mode  Cnt        Score       Error  Units
-  
+
   GeoJSONBenchmarks.decodeMagnoliaError         thrpt    5   981094.831 ± 11051.370  ops/s
   GeoJSONBenchmarks.decodeShapelessError        thrpt    5   816704.635 ±  9781.467  ops/s
   GeoJSONBenchmarks.decodeManualError           thrpt    5   586733.762 ±  6389.296  ops/s
-  
+
   GoogleMapsAPIBenchmarks.decodeMagnoliaError   thrpt    5  1288888.446 ± 11091.080  ops/s
   GoogleMapsAPIBenchmarks.decodeShapelessError  thrpt    5  1010145.363 ±  9448.110  ops/s
   GoogleMapsAPIBenchmarks.decodeManualError     thrpt    5  1417662.720 ±  1197.283  ops/s
-  
+
   TwitterAPIBenchmarks.decodeMagnoliaError      thrpt    5   128704.299 ±   832.122  ops/s
   TwitterAPIBenchmarks.decodeShapelessError     thrpt    5   109715.865 ±   826.488  ops/s
   TwitterAPIBenchmarks.decodeManualError        thrpt    5   148814.730 ±  1105.316  ops/s
-~~~~~~~~
+```
 
 Just when we thought we were seeing a pattern, both Magnolia and Shapeless win
 the race when decoding invalid GeoJSON data, but manual instances win the Google
@@ -13946,25 +14466,26 @@ contents (`True`) and two values that contain slightly different contents
 (`False`)
 
 {lang="text"}
-~~~~~~~~
+
+```
   > jsonformat/jmh:run -i 5 -wi 5 -f1 -t1 -w1 -r1 .*equal*
   Benchmark                                     Mode  Cnt        Score       Error  Units
-  
+
   GeoJSONBenchmarks.equalScalazTrue            thrpt    5   276851.493 ±  1776.428  ops/s
   GeoJSONBenchmarks.equalMagnoliaTrue          thrpt    5    93106.945 ±  1051.062  ops/s
   GeoJSONBenchmarks.equalShapelessTrue         thrpt    5   266633.522 ±  4972.167  ops/s
   GeoJSONBenchmarks.equalManualTrue            thrpt    5   599219.169 ±  8331.308  ops/s
-  
+
   GoogleMapsAPIBenchmarks.equalScalazTrue      thrpt    5    35442.577 ±   281.597  ops/s
   GoogleMapsAPIBenchmarks.equalMagnoliaTrue    thrpt    5    91016.557 ±   688.308  ops/s
   GoogleMapsAPIBenchmarks.equalShapelessTrue   thrpt    5   107245.505 ±   468.427  ops/s
   GoogleMapsAPIBenchmarks.equalManualTrue      thrpt    5   302247.760 ±  1927.858  ops/s
-  
+
   TwitterAPIBenchmarks.equalScalazTrue         thrpt    5    99066.013 ±  1125.422  ops/s
   TwitterAPIBenchmarks.equalMagnoliaTrue       thrpt    5   236289.706 ±  3182.664  ops/s
   TwitterAPIBenchmarks.equalShapelessTrue      thrpt    5   251578.931 ±  2430.738  ops/s
   TwitterAPIBenchmarks.equalManualTrue         thrpt    5   865845.158 ±  6339.379  ops/s
-~~~~~~~~
+```
 
 As expected, the manual instances are far ahead of the crowd, with Shapeless
 mostly leading the automatic derivations. `scalaz-deriving` makes a great effort
@@ -13972,25 +14493,26 @@ for GeoJSON but falls far behind in both the Google Maps and Twitter tests. The
 `False` tests are more of the same:
 
 {lang="text"}
-~~~~~~~~
+
+```
   > jsonformat/jmh:run -i 5 -wi 5 -f1 -t1 -w1 -r1 .*equal*
   Benchmark                                     Mode  Cnt        Score       Error  Units
-  
+
   GeoJSONBenchmarks.equalScalazFalse           thrpt    5    89552.875 ±   821.791  ops/s
   GeoJSONBenchmarks.equalMagnoliaFalse         thrpt    5    86044.021 ±  7790.350  ops/s
   GeoJSONBenchmarks.equalShapelessFalse        thrpt    5   262979.062 ±  3310.750  ops/s
   GeoJSONBenchmarks.equalManualFalse           thrpt    5   599989.203 ± 23727.672  ops/s
-  
+
   GoogleMapsAPIBenchmarks.equalScalazFalse     thrpt    5    35970.818 ±   288.609  ops/s
   GoogleMapsAPIBenchmarks.equalMagnoliaFalse   thrpt    5    82381.975 ±   625.407  ops/s
   GoogleMapsAPIBenchmarks.equalShapelessFalse  thrpt    5   110721.122 ±   579.331  ops/s
   GoogleMapsAPIBenchmarks.equalManualFalse     thrpt    5   303588.815 ±  2562.747  ops/s
-  
+
   TwitterAPIBenchmarks.equalScalazFalse        thrpt    5   193930.568 ±  1176.421  ops/s
   TwitterAPIBenchmarks.equalMagnoliaFalse      thrpt    5   429764.654 ± 11944.057  ops/s
   TwitterAPIBenchmarks.equalShapelessFalse     thrpt    5   494510.588 ±  1455.647  ops/s
   TwitterAPIBenchmarks.equalManualFalse        thrpt    5  1631964.531 ± 13110.291  ops/s
-~~~~~~~~
+```
 
 The runtime performance of `scalaz-deriving`, Magnolia and Shapeless is usually
 good enough. We should be realistic: we are not writing applications that need to
@@ -14013,14 +14535,13 @@ A> of `.xmap`, `.map` and `.contramap` on the relevant typeclasses, but it is fa
 A> to say that the codebase primarily focuses on readability over optimisation and
 A> still achieves incredible performance.
 
-
 ## Summary
 
 When deciding on a technology to use for typeclass derivation, this feature
 chart may help:
 
 | Feature        | Scalaz | Magnolia | Shapeless    | Manual       |
-|-------------- |------ |-------- |------------ |------------ |
+| -------------- | ------ | -------- | ------------ | ------------ |
 | `@deriving`    | yes    | yes      | yes          |              |
 | Laws           | yes    |          |              |              |
 | Fast compiles  | yes    | yes      |              | yes          |
@@ -14038,7 +14559,6 @@ Manual instances are always an escape hatch for special cases and to achieve the
 ultimate performance. Avoid introducing typo bugs with manual instances by using
 a code generation tool.
 
-
 # Wiring up the Application
 
 To finish, we will apply what we have learnt to wire up the example application,
@@ -14052,19 +14572,19 @@ but many readers may prefer to explore the codebase in addition to this text.
 Some parts of the application have been left unimplemented, as an exercise to
 the reader. See the `README` for further instructions.
 
-
 ## Overview
 
 Our main application only requires an implementation of the `DynAgents` algebra.
 
 {lang="text"}
-~~~~~~~~
+
+```
   trait DynAgents[F[_]] {
     def initial: F[WorldView]
     def update(old: WorldView): F[WorldView]
     def act(world: WorldView): F[WorldView]
   }
-~~~~~~~~
+```
 
 We have an implementation already, `DynAgentsModule`, which requires
 implementations of the `Drone` and `Machines` algebras, which require a
@@ -14074,7 +14594,8 @@ It is helpful to get a complete picture of all the algebras, modules and
 interpreters of the application. This is the layout of the source code:
 
 {lang="text"}
-~~~~~~~~
+
+```
   ├── dda
   │   ├── algebra.scala
   │   ├── DynAgents.scala
@@ -14104,33 +14625,34 @@ interpreters of the application. This is the layout of the source code:
       ├── Epoch.scala
       ├── LocalClock.scala
       └── Sleep.scala
-~~~~~~~~
+```
 
 The signatures of all the algebras can be summarised as
 
 {lang="text"}
-~~~~~~~~
+
+```
   trait Sleep[F[_]] {
     def sleep(time: FiniteDuration): F[Unit]
   }
-  
+
   trait LocalClock[F[_]] {
     def now: F[Epoch]
   }
-  
+
   trait JsonClient[F[_]] {
     def get[A: JsDecoder](
       uri: String Refined Url,
       headers: IList[(String, String)]
     ): F[A]
-  
+
     def post[P: UrlEncodedWriter, A: JsDecoder](
       uri: String Refined Url,
       payload: P,
       headers: IList[(String, String)]
     ): F[A]
   }
-  
+
   trait Auth[F[_]] {
     def authenticate: F[CodeToken]
   }
@@ -14143,18 +14665,18 @@ The signatures of all the algebras can be summarised as
   trait OAuth2JsonClient[F[_]] {
     // same methods as JsonClient, but doing OAuth2 transparently
   }
-  
+
   trait UserInteraction[F[_]] {
     def start: F[String Refined Url]
     def open(uri: String Refined Url): F[Unit]
     def stop: F[CodeToken]
   }
-  
+
   trait Drone[F[_]] {
     def getBacklog: F[Int]
     def getAgents: F[Int]
   }
-  
+
   trait Machines[F[_]] {
     def getTime: F[Epoch]
     def getManaged: F[NonEmptyList[MachineNode]]
@@ -14162,7 +14684,7 @@ The signatures of all the algebras can be summarised as
     def start(node: MachineNode): F[Unit]
     def stop(node: MachineNode): F[Unit]
   }
-~~~~~~~~
+```
 
 Note that some signatures from previous chapters have been refactored to use
 Scalaz data types, now that we know why they are superior to the stdlib.
@@ -14170,43 +14692,45 @@ Scalaz data types, now that we know why they are superior to the stdlib.
 The data types are:
 
 {lang="text"}
-~~~~~~~~
+
+```
   @xderiving(Order, Arbitrary)
   final case class Epoch(millis: Long) extends AnyVal
-  
+
   @deriving(Order, Show)
   final case class MachineNode(id: String)
-  
+
   @deriving(Equal, Show)
   final case class CodeToken(token: String, redirect_uri: String Refined Url)
-  
+
   @xderiving(Equal, Show, ConfigReader)
   final case class RefreshToken(token: String) extends AnyVal
-  
+
   @deriving(Equal, Show, ConfigReader)
   final case class BearerToken(token: String, expires: Epoch)
-  
+
   @deriving(ConfigReader)
   final case class OAuth2Config(token: RefreshToken, server: ServerConfig)
-  
+
   @deriving(ConfigReader)
   final case class AppConfig(drone: BearerToken, machines: OAuth2Config)
-  
+
   @xderiving(UrlEncodedWriter)
   final case class UrlQuery(params: IList[(String, String)]) extends AnyVal
-~~~~~~~~
+```
 
 and the typeclasses are
 
 {lang="text"}
-~~~~~~~~
+
+```
   @typeclass trait UrlEncodedWriter[A] {
     def toUrlEncoded(a: A): String Refined UrlEncoded
   }
   @typeclass trait UrlQueryWriter[A] {
     def toUrlQuery(a: A): UrlQuery
   }
-~~~~~~~~
+```
 
 We derive useful typeclasses using `scalaz-deriving` and Magnolia. The
 `ConfigReader` typeclass is from the `pureconfig` library and is used to read
@@ -14216,25 +14740,27 @@ And without going into the detail of how to implement the algebras, we need to
 know the dependency graph of our `DynAgentsModule`.
 
 {lang="text"}
-~~~~~~~~
+
+```
   final class DynAgentsModule[F[_]: Applicative](
     D: Drone[F],
     M: Machines[F]
   ) extends DynAgents[F] { ... }
-  
+
   final class DroneModule[F[_]](
     H: OAuth2JsonClient[F]
   ) extends Drone[F] { ... }
-  
+
   final class GoogleMachinesModule[F[_]](
     H: OAuth2JsonClient[F]
   ) extends Machines[F] { ... }
-~~~~~~~~
+```
 
 There are two modules implementing `OAuth2JsonClient`, one that will use the OAuth2 `Refresh` algebra (for Google) and another that reuses a non-expiring `BearerToken` (for Drone).
 
 {lang="text"}
-~~~~~~~~
+
+```
   final class OAuth2JsonClientModule[F[_]](
     token: RefreshToken
   )(
@@ -14244,13 +14770,13 @@ There are two modules implementing `OAuth2JsonClient`, one that will use the OAu
   )(
     implicit F: MonadState[F, BearerToken]
   ) extends OAuth2JsonClient[F] { ... }
-  
+
   final class BearerJsonClientModule[F[_]: Monad](
     bearer: BearerToken
   )(
     H: JsonClient[F]
   ) extends OAuth2JsonClient[F] { ... }
-~~~~~~~~
+```
 
 So far we have seen requirements for `F` to have an `Applicative[F]`, `Monad[F]`
 and `MonadState[F, BearerToken]`. All of these requirements can be satisfied by
@@ -14259,10 +14785,11 @@ using `StateT[Task, BearerToken, ?]` as our application's context.
 However, some of our algebras only have one interpreter, using `Task`
 
 {lang="text"}
-~~~~~~~~
+
+```
   final class LocalClockTask extends LocalClock[Task] { ... }
   final class SleepTask extends Sleep[Task] { ... }
-~~~~~~~~
+```
 
 But recall that our algebras can provide a `liftM` on their companion, see
 Chapter 7.4 on the Monad Transformer Library, allowing us to lift a
@@ -14274,7 +14801,8 @@ when we go to the next layer. Our `JsonClient` has an interpreter using a
 different context
 
 {lang="text"}
-~~~~~~~~
+
+```
   final class BlazeJsonClient[F[_]](H: Client[Task])(
     implicit
     F: MonadError[F, JsonClient.Error],
@@ -14287,7 +14815,7 @@ different context
       I: MonadIO[F, Throwable]
     ): Task[JsonClient[F]] = ...
   }
-~~~~~~~~
+```
 
 Note that the `BlazeJsonClient` constructor returns a `Task[JsonClient[F]]`, not
 a `JsonClient[F]`. This is because the act of creating the client is effectful:
@@ -14316,20 +14844,21 @@ additional dependencies, but thankfully no change to the application's `F[_]`
 context.
 
 {lang="text"}
-~~~~~~~~
+
+```
   final class AuthModule[F[_]: Monad](
     config: ServerConfig
   )(
     I: UserInteraction[F]
   ) extends Auth[F] { ... }
-  
+
   final class AccessModule[F[_]: Monad](
     config: ServerConfig
   )(
     H: JsonClient[F],
     T: LocalClock[F]
   ) extends Access[F] { ... }
-  
+
   final class BlazeUserInteraction private (
     pserver: Promise[Void, Server[Task]],
     ptoken: Promise[Void, String]
@@ -14337,7 +14866,7 @@ context.
   object BlazeUserInteraction {
     def apply(): Task[BlazeUserInteraction] = ...
   }
-~~~~~~~~
+```
 
 The interpreter for `UserInteraction` is the most complex part of our codebase:
 it starts an HTTP server, sends the user to visit a webpage in their browser,
@@ -14353,7 +14882,6 @@ state management to the main application, which would become responsible for
 providing the initial value. We also couldn't use `StateT` in this scenario
 because we need "wait for" semantics that are only provided by `Promise`.
 
-
 ## `Main`
 
 The ugliest part of FP is making sure that monads are all aligned and this tends
@@ -14362,17 +14890,19 @@ to happen in the `Main` entrypoint.
 Our main loop is
 
 {lang="text"}
-~~~~~~~~
+
+```
   state = initial()
   while True:
     state = update(state)
     state = act(state)
-~~~~~~~~
+```
 
 and the good news is that the actual code will look like
 
 {lang="text"}
-~~~~~~~~
+
+```
   for {
     old     <- F.get
     updated <- A.update(old)
@@ -14380,7 +14910,7 @@ and the good news is that the actual code will look like
     _       <- F.put(changed)
     _       <- S.sleep(10.seconds)
   } yield ()
-~~~~~~~~
+```
 
 where `F` holds the state of the world in a `MonadState[F, WorldView]`. We can
 put this into a method called `.step` and repeat it forever by calling
@@ -14393,7 +14923,8 @@ Everything gets a `.liftM` added to it to lift it into the larger stack.
 The code we want to write for the one-shot authentication mode is
 
 {lang="text"}
-~~~~~~~~
+
+```
   def auth(name: String): Task[Unit] = {
     for {
       config    <- readConfig[ServerConfig](name + ".server")
@@ -14407,7 +14938,7 @@ The code we want to write for the one-shot authentication mode is
       _         <- putStrLn(s"got token: $token")
     } yield ()
   }.run
-~~~~~~~~
+```
 
 where `.readConfig` and `.putStrLn` are library calls. We can think of them as
 `Task` interpreters of algebras that read the application's runtime
@@ -14420,9 +14951,10 @@ JsonClient.Error]`. This can be provided by `EitherT`. We can therefore
 construct the common monad stack for the entire `for` comprehension as
 
 {lang="text"}
-~~~~~~~~
+
+```
   type H[a] = EitherT[Task, JsonClient.Error, a]
-~~~~~~~~
+```
 
 Unfortunately this means we must `.liftM` everything that returns a `Task`,
 which adds quite a lot of boilerplate. Unfortunately, the `.liftM` method does
@@ -14430,15 +14962,17 @@ not take a type of shape `H[_]`, it takes a type of shape `H[_[_], _]`, so we
 need to create a type alias to help out the compiler:
 
 {lang="text"}
-~~~~~~~~
+
+```
   type HT[f[_], a] = EitherT[f, JsonClient.Error, a]
   type H[a]        = HT[Task, a]
-~~~~~~~~
+```
 
 we can now call `.liftM[HT]` when we receive a `Task`
 
 {lang="text"}
-~~~~~~~~
+
+```
   for {
     config    <- readConfig[ServerConfig](name + ".server").liftM[HT]
     ui        <- BlazeUserInteraction().liftM[HT]
@@ -14450,14 +14984,15 @@ we can now call `.liftM[HT]` when we receive a `Task`
     token     <- access.access(codetoken)
     _         <- putStrLn(s"got token: $token").liftM[HT]
   } yield ()
-~~~~~~~~
+```
 
 But this still doesn't compile, because `clock` is a `LocalClock[Task]` and `AccessModule` requires a `LocalClock[H]`. We simply add the necessary `.liftM` boilerplate to the companion of `LocalClock` and can then lift the entire algebra
 
 {lang="text"}
-~~~~~~~~
+
+```
   clock     = LocalClock.liftM[Task, HT](new LocalClockTask)
-~~~~~~~~
+```
 
 and now everything compiles!
 
@@ -14465,9 +15000,9 @@ The second approach to wiring up an application is more complex, but necessary
 when there are conflicts in the monad stack, such as we need in our main loop.
 If we perform an analysis we find that the following are needed:
 
--   `MonadError[F, JsonClient.Error]` for uses of the `JsonClient`
--   `MonadState[F, BearerToken]` for uses of the `OAuth2JsonClient`
--   `MonadState[F, WorldView]` for our main loop
+- `MonadError[F, JsonClient.Error]` for uses of the `JsonClient`
+- `MonadState[F, BearerToken]` for uses of the `OAuth2JsonClient`
+- `MonadState[F, WorldView]` for our main loop
 
 Unfortunately, the two `MonadState` requirements are in conflict. We could
 construct a data type that captures all the state of the program, but that is a
@@ -14477,15 +15012,16 @@ where it is needed.
 We now need to think about three layers, which we will call `F`, `G`, `H`
 
 {lang="text"}
-~~~~~~~~
+
+```
   type HT[f[_], a] = EitherT[f, JsonClient.Error, a]
   type GT[f[_], a] = StateT[f, BearerToken, a]
   type FT[f[_], a] = StateT[f, WorldView, a]
-  
+
   type H[a]        = HT[Task, a]
   type G[a]        = GT[H, a]
   type F[a]        = FT[G, a]
-~~~~~~~~
+```
 
 Now some bad news about `.liftM`... it only works for one layer at a time. If we
 have a `Task[A]` and we want an `F[A]`, we have to go through each step and type
@@ -14493,27 +15029,30 @@ have a `Task[A]` and we want an `F[A]`, we have to go through each step and type
 call `liftM` multiple times. To get a `Sleep[F]`, we have to type
 
 {lang="text"}
-~~~~~~~~
+
+```
   val S: Sleep[F] = {
     import Sleep.liftM
     liftM(liftM(liftM(new SleepTask)))
   }
-~~~~~~~~
+```
 
 and to get a `LocalClock[G]` we do two lifts
 
 {lang="text"}
-~~~~~~~~
+
+```
   val T: LocalClock[G] = {
     import LocalClock.liftM
     liftM(liftM(new LocalClockTask))
   }
-~~~~~~~~
+```
 
 The main application then becomes
 
 {lang="text"}
-~~~~~~~~
+
+```
   def agents(bearer: BearerToken): Task[Unit] = {
     ...
     for {
@@ -14537,7 +15076,7 @@ The main application then becomes
       }.eval(bearer).run
     } yield ()
   }
-~~~~~~~~
+```
 
 where the outer loop is using `Task`, the middle loop is using `G`, and the
 inner loop is using `F`.
@@ -14549,7 +15088,8 @@ state for the `StateT` parts of our application. The `.run` is to reveal the
 We can call these two application entry points from our `SafeApp`
 
 {lang="text"}
-~~~~~~~~
+
+```
   object Main extends SafeApp {
     def run(args: List[String]): IO[Void, ExitStatus] = {
       if (args.contains("--machines")) auth("machines")
@@ -14559,12 +15099,13 @@ We can call these two application entry points from our `SafeApp`
       case -\/(err) => ExitStatus.ExitNow(1)
     }
   }
-~~~~~~~~
+```
 
 and then run it!
 
 {lang="text"}
-~~~~~~~~
+
+```
   > runMain fommil.dda.Main --machines
   [info] Running (fork) fommil.dda.Main --machines
   ...
@@ -14577,10 +15118,9 @@ and then run it!
   [info] POST https://www.googleapis.com/oauth2/v4/token
   ...
   [info] got token: "<elided>"
-~~~~~~~~
+```
 
 Yay!
-
 
 ## Blaze
 
@@ -14590,45 +15130,48 @@ The interpreters for their client and server algebras are called *Blaze*.
 We need the following dependencies
 
 {lang="text"}
-~~~~~~~~
+
+```
   val http4sVersion = "0.18.16"
   libraryDependencies ++= Seq(
     "org.http4s"            %% "http4s-dsl"          % http4sVersion,
     "org.http4s"            %% "http4s-blaze-server" % http4sVersion,
     "org.http4s"            %% "http4s-blaze-client" % http4sVersion
   )
-~~~~~~~~
-
+```
 
 ### `BlazeJsonClient`
 
 We will need some imports
 
 {lang="text"}
-~~~~~~~~
+
+```
   import org.http4s
   import org.http4s.{ EntityEncoder, MediaType }
   import org.http4s.headers.`Content-Type`
   import org.http4s.client.Client
   import org.http4s.client.blaze.{ BlazeClientConfig, Http1Client }
-~~~~~~~~
+```
 
 The `Client` module can be summarised as
 
 {lang="text"}
-~~~~~~~~
+
+```
   final class Client[F[_]](
     val shutdown: F[Unit]
   )(implicit F: MonadError[F, Throwable]) {
     def fetch[A](req: Request[F])(f: Response[F] => F[A]): F[A] = ...
     ...
   }
-~~~~~~~~
+```
 
 where `Request` and `Response` are data types:
 
 {lang="text"}
-~~~~~~~~
+
+```
   final case class Request[F[_]](
     method: Method
     uri: Uri,
@@ -14639,35 +15182,36 @@ where `Request` and `Response` are data types:
                    (implicit F: Monad[F], A: EntityEncoder[F, A]): F[Request[F]] = ...
     ...
   }
-  
+
   final case class Response[F[_]](
     status: Status,
     headers: Headers,
     body: EntityBody[F]
   )
-~~~~~~~~
+```
 
 made of
 
 {lang="text"}
-~~~~~~~~
+
+```
   final case class Headers(headers: List[Header])
   final case class Header(name: String, value: String)
-  
+
   final case class Uri( ... )
   object Uri {
     // not total, only use if `s` is guaranteed to be a URL
     def unsafeFromString(s: String): Uri = ...
     ...
   }
-  
+
   final case class Status(code: Int) {
     def isSuccess: Boolean = ...
     ...
   }
-  
+
   type EntityBody[F[_]] = fs2.Stream[F, Byte]
-~~~~~~~~
+```
 
 The `EntityBody` type is an alias to `Stream` from the [`fs2`](https://github.com/functional-streams-for-scala/fs2) library. The
 `Stream` data type can be thought of as an effectful, lazy, pull-based stream of
@@ -14681,26 +15225,28 @@ We need to convert our header and URL representations into the versions required
 by http4s:
 
 {lang="text"}
-~~~~~~~~
+
+```
   def convert(headers: IList[(String, String)]): http4s.Headers =
     http4s.Headers(
       headers.foldRight(List[http4s.Header]()) {
         case ((key, value), acc) => http4s.Header(key, value) :: acc
       }
     )
-  
+
   def convert(uri: String Refined Url): http4s.Uri =
     http4s.Uri.unsafeFromString(uri.value) // we already validated our String
-~~~~~~~~
+```
 
 Both our `.get` and `.post` methods require a conversion from the http4s
 `Response` type into an `A`. We can factor this out into a single function,
 `.handler`
 
 {lang="text"}
-~~~~~~~~
+
+```
   import JsonClient.Error
-  
+
   final class BlazeJsonClient[F[_]] private (H: Client[Task])(
     implicit
     F: MonadError[F, Error],
@@ -14719,7 +15265,7 @@ Both our `.get` and `.post` methods require a conversion from the http4s
         } yield res
     }
   }
-~~~~~~~~
+```
 
 The `.through(fs2.text.utf8Decode)` is to convert a `Stream[Task, Byte]` into a
 `Stream[Task, String]`, with `.compile.foldMonoid` interpreting it with our
@@ -14732,7 +15278,8 @@ required output.
 This is our implementation of `.get`
 
 {lang="text"}
-~~~~~~~~
+
+```
   def get[A: JsDecoder](
     uri: String Refined Url,
     headers: IList[(String, String)]
@@ -14746,7 +15293,7 @@ This is our implementation of `.get`
         )(handler[A])
       )
       .emap(identity)
-~~~~~~~~
+```
 
 `.get` is all plumbing: we convert our input types into the `http4s.Request`,
 then call `.fetch` on the `Client` with our `handler`. This gives us back a
@@ -14758,10 +15305,11 @@ Unfortunately, if we try to compile this code it will fail. The error will look
 something like
 
 {lang="text"}
-~~~~~~~~
+
+```
   [error] BlazeJsonClient.scala:95:64: could not find implicit value for parameter
   [error]  F: cats.effect.Sync[scalaz.ioeffect.Task]
-~~~~~~~~
+```
 
 Basically, something about a missing cat.
 
@@ -14771,58 +15319,64 @@ not Scalaz. Thankfully, `scalaz-ioeffect` provides a compatibility layer and the
 get our code to compile with these dependencies:
 
 {lang="text"}
-~~~~~~~~
+
+```
   libraryDependencies ++= Seq(
     "com.codecommit" %% "shims"                % "1.4.0",
     "org.scalaz"     %% "scalaz-ioeffect-cats" % "2.10.1"
   )
-~~~~~~~~
+```
 
 and these imports
 
 {lang="text"}
-~~~~~~~~
+
+```
   import shims._
   import scalaz.ioeffect.catz._
-~~~~~~~~
+```
 
 The implementation of `.post` is similar but we must also provide an instance of
 
 {lang="text"}
-~~~~~~~~
+
+```
   EntityEncoder[Task, String Refined UrlEncoded]
-~~~~~~~~
+```
 
 Thankfully, the `EntityEncoder` typeclass provides conveniences to let us derive
 one from the existing `String` encoder
 
 {lang="text"}
-~~~~~~~~
+
+```
   implicit val encoder: EntityEncoder[Task, String Refined UrlEncoded] =
     EntityEncoder[Task, String]
       .contramap[String Refined UrlEncoded](_.value)
       .withContentType(
         `Content-Type`(MediaType.`application/x-www-form-urlencoded`)
       )
-~~~~~~~~
+```
 
 The only difference between `.get` and `.post` is the way we construct our `http4s.Request`
 
 {lang="text"}
-~~~~~~~~
+
+```
   http4s.Request[Task](
     method = http4s.Method.POST,
     uri = convert(uri),
     headers = convert(headers)
   )
   .withBody(payload.toUrlEncoded)
-~~~~~~~~
+```
 
 and the final piece is the constructor, which is a case of calling `Http1Client`
 with a configuration object
 
 {lang="text"}
-~~~~~~~~
+
+```
   object BlazeJsonClient {
     def apply[F[_]](
       implicit
@@ -14831,8 +15385,7 @@ with a configuration object
     ): Task[JsonClient[F]] =
       Http1Client(BlazeClientConfig.defaultConfig).map(new BlazeJsonClient(_))
   }
-~~~~~~~~
-
+```
 
 ### `BlazeUserInteraction`
 
@@ -14840,38 +15393,42 @@ We need to spin up an HTTP server, which is a lot easier than it sounds. First,
 the imports
 
 {lang="text"}
-~~~~~~~~
+
+```
   import org.http4s._
   import org.http4s.dsl._
   import org.http4s.server.Server
   import org.http4s.server.blaze._
-~~~~~~~~
+```
 
 We need to create a `dsl` for our effect type, which we then import
 
 {lang="text"}
-~~~~~~~~
+
+```
   private val dsl = new Http4sDsl[Task] {}
   import dsl._
-~~~~~~~~
+```
 
 Now we can use the [http4s dsl](https://http4s.org/v0.18/dsl/) to create HTTP endpoints. Rather than describe
 everything that can be done, we will simply implement the endpoint which is
 similar to any of other HTTP DSLs
 
 {lang="text"}
-~~~~~~~~
+
+```
   private object Code extends QueryParamDecoderMatcher[String]("code")
   private val service: HttpService[Task] = HttpService[Task] {
     case GET -> Root :? Code(code) => ...
   }
-~~~~~~~~
+```
 
 The return type of each pattern match is a `Task[Response[Task]]`. In our
 implementation we want to take the `code` and put it into the `ptoken` promise:
 
 {lang="text"}
-~~~~~~~~
+
+```
   final class BlazeUserInteraction private (
     pserver: Promise[Throwable, Server[Task]],
     ptoken: Promise[Throwable, String]
@@ -14885,16 +15442,17 @@ implementation we want to take the `code` and put it into the `ptoken` promise:
     }
     ...
   }
-~~~~~~~~
+```
 
 but the definition of our services routes is not enough, we need to launch a
 server, which we do with `BlazeBuilder`
 
 {lang="text"}
-~~~~~~~~
+
+```
   private val launch: Task[Server[Task]] =
     BlazeBuilder[Task].bindHttp(0, "localhost").mountService(service, "/").start
-~~~~~~~~
+```
 
 Binding to port `0` makes the operating system assign an ephemeral port. We can
 discover which port it is actually running on by querying the `server.address`
@@ -14903,7 +15461,8 @@ field.
 Our implementation of the `.start` and `.stop` methods is now straightforward
 
 {lang="text"}
-~~~~~~~~
+
+```
   def start: Task[String Refined Url] =
     for {
       server  <- launch
@@ -14911,21 +15470,21 @@ Our implementation of the `.start` and `.stop` methods is now straightforward
       _ <- if (updated) Task.unit
            else server.shutdown *> fail("server was already running")
     } yield mkUrl(server)
-  
+
   def stop: Task[CodeToken] =
     for {
       server <- pserver.get
       token  <- ptoken.get
       _      <- IO.sleep(1.second) *> server.shutdown
     } yield CodeToken(token, mkUrl(server))
-  
+
   private def mkUrl(s: Server[Task]): String Refined Url = {
     val port = s.address.getPort
     Refined.unsafeApply(s"http://localhost:${port}/")
   }
   private def fail[A](s: String): String =
     Task.fail(new IOException(s) with NoStackTrace)
-~~~~~~~~
+```
 
 The `1.second` sleep is necessary to avoid shutting down the server before the
 response is sent back to the browser. IO doesn't mess around when it comes to
@@ -14935,7 +15494,8 @@ Finally, to create a `BlazeUserInteraction`, we just need the two uninitialised
 promises
 
 {lang="text"}
-~~~~~~~~
+
+```
   object BlazeUserInteraction {
     def apply(): Task[BlazeUserInteraction] = {
       for {
@@ -14944,12 +15504,11 @@ promises
       } yield new BlazeUserInteraction(p1, p2)
     }
   }
-~~~~~~~~
+```
 
 We could use `IO[Void, ?]` instead, but since the rest of our application is
 using `Task` (i.e. `IO[Throwable, ?]`), we `.widenError` to avoid introducing
 any boilerplate that would distract us.
-
 
 ## Thank You
 
@@ -14962,5 +15521,3 @@ readers find out about it.
 Get involved with Scalaz by joining the [gitter chat room](https://gitter.im/scalaz/scalaz). From there you can ask
 for advice, help newcomers (you're an expert now), and contribute to the next
 release.
-
-

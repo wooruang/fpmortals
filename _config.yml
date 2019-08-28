@@ -1,18 +1,22 @@
-title: Chris Bobbe
-subtitle: Web Developer
-description: Website and portfolio of Chris Bobbe, front-end web developer.
+title: fpmortals
+subtitle: 한국어 번역
+description: fpmortals의 한국어 번역 페이지
 
-author: Chris Bobbe
-email: csbobbe@gmail.com
-avatar: assets/images/avatar.jpg
+author: wooruang
+email: wooruang@gmail.com
+# avatar: assets/images/avatar.jpg
 
 baseurl: ""
-url: "https://chrisbobbe.github.io"
+url: "https://wooruang.github.io/fpmortals"
 
 # Social settings
+medium_url: https://medium.com/@wooruang
+github_url: https://github.com/wooruang
+linkedin_url: https://www.linkedin.com/in/hansaem-lee-47990a13b
+twitter_url: https://twitter.com/wooruwang
 
-# SEO settiongs
-google_analytics: UA-112211352-1
+# SEO settings
+# google_analytics: 
 
 # Build settings
 remote_theme: chrisbobbe/jekyll-theme-prologue

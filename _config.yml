@@ -6,8 +6,8 @@ author: wooruang
 email: wooruang@gmail.com
 # avatar: assets/images/avatar.jpg
 
-baseurl: ""
-url: "https://wooruang.github.io/fpmortals"
+baseurl: "/fpmortals"
+url: "https://wooruang.github.io/"
 
 # Social settings
 medium_url: https://medium.com/@wooruang
